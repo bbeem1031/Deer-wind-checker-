@@ -425,22 +425,6 @@ function loop(){
     if(p.a>p.life||p.x<-10||p.y<-10||p.x>W+10||p.y>H+10){Object.assign(p,newDot(false));}
     dot(p.x,p.y,p.r,p.c,Math.sin(Math.PI*p.a/p.life)*.85);
   }
-  if(pos){
-    const o=map.latLngToContainerPoint(pos);
-    const e=map.latLngToContainerPoint(dest(pos[0],pos[1],(v.d+180)%360,SCENT_M));
-    const len=Math.hypot(e.x-o.x,e.y-o.y), sp=spreadDeg()*Math.PI/180;
-    for(let k=0;k<4;k++){
-      const ang=to+gauss()*sp*.75, v=(base*2.4+len/260)*(.75+Math.random()*.5);
-      plume.push({ox:0,oy:0,dx:Math.sin(ang)*v,dy:-Math.cos(ang)*v,d:0,r:1.2+Math.random()*1.1});
-    }
-    if(plume.length>600) plume.splice(0,plume.length-600);
-    for(let i=plume.length-1;i>=0;i--){
-      const q=plume[i]; q.ox+=q.dx;q.oy+=q.dy;q.d=Math.hypot(q.ox,q.oy);
-      if(q.d>len){plume.splice(i,1);continue;}
-      const f=q.d/len, col=f<.35?'255,226,90':f<.7?'255,180,60':'255,130,40';
-      dot(o.x+q.ox,o.y+q.oy,q.r,col,(1-f)*.95);
-    }
-  }
 }
 
 startGps();
