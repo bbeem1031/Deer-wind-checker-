@@ -66,16 +66,10 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
 .hours{margin-top:5px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
 .hours::-webkit-scrollbar{display:none}
 .hr{flex:none;width:48px;text-align:center;padding:5px 0;border-radius:8px;background:rgba(236,230,214,.06);border:2px solid transparent;color:var(--bone);font:inherit;cursor:pointer}
-.hr.now{background:rgba(236,230,214,.14)}
-.hr.now .t{color:var(--bone);font-weight:600}
 .hr.sel{background:var(--blaze);border-color:var(--blaze)}
 .hr.sel .t,.hr.sel .d,.hr.sel .s{color:#1a0d04}
 .hr.sel path{stroke:#1a0d04}.hr.sel path+path{fill:#1a0d04;stroke:none}.hr.sel circle{fill:#fff}
-.ahead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;padding:7px 8px 7px 12px;border-radius:10px;background:var(--blaze);color:#1a0d04;pointer-events:auto}
-.ahead b{font-family:var(--display);font-size:19px;font-weight:700;line-height:1}
-.ahead span{display:block;font-size:11px;font-weight:500}
-.ahead button{background:#1a0d04;color:var(--bone);border-color:#1a0d04;white-space:nowrap}
-body.future .top{background:linear-gradient(rgba(60,26,6,.9) 60%,transparent)}
+.viewing{margin-top:6px;font-family:var(--display);font-size:20px;font-weight:700;color:var(--blaze);line-height:1}
 .hr .t{font-size:10px;color:var(--dim)}
 .hr svg{display:block;margin:2px auto}
 .hr .s{font-family:var(--display);font-weight:600;font-size:14px;font-variant-numeric:tabular-nums}
@@ -105,7 +99,7 @@ body.future .top{background:linear-gradient(rgba(60,26,6,.9) 60%,transparent)}
     <div id="set">--<span>Sunset</span></div>
   </div>
   <div class="legal" id="legal"></div>
-  <div class="ahead" id="ahead" hidden><div><b id="aheadT">Viewing forecast</b><span id="aheadSub">Map and dial show this hour's wind</span></div><button id="btnNow" type="button">Back to now</button></div>
+  <div class="viewing" id="viewing" hidden></div>
   <div class="status" id="status">Getting your location…</div>
 </header>
 
@@ -212,7 +206,7 @@ function render(){
   $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move`;
   const c=wx.current,h=wx.hourly,key=c.time.slice(0,13)+':00';let i=h.time.indexOf(key);if(i<0)i=0;
   const arrow=d=>`<svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${d} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg>`;
-  let out=`<button type="button" class="hr now" data-t=""><div class="t">Now</div>${arrow(c.wind_direction_10m)}<div class="s">${Math.round(c.wind_speed_10m)}</div><div class="d">${card(c.wind_direction_10m)}</div></button>`;
+  let out=`<button type="button" class="hr" data-t=""><div class="t">Now</div>${arrow(c.wind_direction_10m)}<div class="s">${Math.round(c.wind_speed_10m)}</div><div class="d">${card(c.wind_direction_10m)}</div></button>`;
   for(let k=1;k<=18&&i+k<h.time.length;k++){
     const j=i+k,d=h.wind_direction_10m[j];
     const hr=new Date(h.time[j]).toLocaleTimeString([],{hour:'numeric'});
@@ -230,14 +224,12 @@ function applyView(){
   $('tmp').innerHTML=`${Math.round(v.t)}°F<span>Temp</span>`;
   $('retSpd').textContent=v.live?`${mph} mph`:`${mph} mph · ${new Date(v.time).toLocaleTimeString([],{hour:'numeric'})}`;
   $('arrow').style.transform=`rotate(${from}deg)`;
-  document.body.classList.toggle('future',!v.live);
-  $('ahead').hidden=v.live;
+  $('viewing').hidden=v.live;
   if(!v.live){
     const dt=new Date(v.time),today=new Date(wx.current.time).toDateString()===dt.toDateString();
-    $('aheadT').textContent=`Viewing ${dt.toLocaleTimeString([],{hour:'numeric'})} ${today?'today':'tomorrow'}`;
-    $('aheadSub').textContent='Forecast wind on map, dial and cone';
+    $('viewing').textContent=`Viewing ${dt.toLocaleTimeString([],{hour:'numeric'})}${today?'':' tomorrow'}`;
   }
-  document.querySelectorAll('.hr').forEach(b=>b.classList.toggle('sel',!v.live&&b.dataset.t===selTime));
+  document.querySelectorAll('.hr').forEach(b=>b.classList.toggle('sel',v.live?b.dataset.t==='':b.dataset.t===selTime));
   plume=[];
   drawCone(); updateRel(); placeReticle();
 }
@@ -323,9 +315,8 @@ function gpsBtn(){$('btnGps').hidden=(src==='gps');}
 $('btnGps').onclick=()=>{src='gps';gpsBtn();$('status').textContent='Finding you…';startGps();};
 $('hours').addEventListener('click',e=>{
   const b=e.target.closest('.hr'); if(!b||!wx) return;
-  selTime=(b.dataset.t&&b.dataset.t!==selTime)?b.dataset.t:null; applyView();
+  selTime=b.dataset.t||null; applyView();
 });
-$('btnNow').onclick=()=>{selTime=null;applyView();$('hours').scrollTo({left:0,behavior:'smooth'});};
 $('btnRefresh').onclick=async()=>{
   const b=$('btnRefresh');b.disabled=true;b.textContent='Updating…';
   const ok=await fetchWx();
