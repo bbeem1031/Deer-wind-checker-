@@ -57,6 +57,7 @@ html,body{height:100%;margin:0;background:var(--ground);color:var(--bone);font-f
 .rel span{display:block;font-family:var(--body);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);font-weight:500}
 .btns{display:flex;gap:7px;flex-wrap:wrap}
 button{font-family:var(--body);font-size:13px;font-weight:600;color:var(--bone);background:rgba(236,230,214,.08);border:1px solid var(--line);border-radius:9px;padding:7px 11px;cursor:pointer}
+button:disabled{opacity:.6}
 button.on{background:var(--blaze);border-color:var(--blaze);color:#1a0d04}
 button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
 
@@ -117,7 +118,7 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
       <div class="rel" id="rel"><span>Scent drifts toward</span>--</div>
       <div class="btns">
         <button id="btnCompass" type="button">Compass</button>
-        <button id="btnGps" type="button">My GPS</button>
+        <button id="btnGps" type="button" hidden>Back to my spot</button>
         <button id="btnRefresh" type="button">Refresh</button>
       </div>
     </div>
@@ -155,7 +156,7 @@ const standIcon=L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,34],
 
 function setPos(lat,lon,center){
   const moved=!pos||map.distance(pos,[lat,lon])>75;
-  pos=[lat,lon]; plume=[];
+  pos=[lat,lon]; plume=[]; gpsBtn&&setTimeout(gpsBtn);
   if(!me) me=L.marker(pos,{icon:standIcon,zIndexOffset:1000,interactive:false}).addTo(map); else me.setLatLng(pos);
   if(center) map.setView(pos,17);
   drawCone();
@@ -176,8 +177,8 @@ async function fetchWx(){
   if(!pos) return;
   $('status').textContent='Updating wind…';
   const u=`https://api.open-meteo.com/v1/forecast?latitude=${pos[0].toFixed(4)}&longitude=${pos[1].toFixed(4)}&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl&daily=sunrise,sunset&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto&forecast_days=2`;
-  try{const r=await fetch(u);if(!r.ok)throw 0;wx=await r.json();lastFetch=Date.now();render();}
-  catch(e){$('status').innerHTML='<b>No signal for wind data.</b> Tap Refresh when you have bars.';}
+  try{const r=await fetch(u);if(!r.ok)throw 0;wx=await r.json();lastFetch=Date.now();render();return true;}
+  catch(e){$('status').innerHTML='<b>No signal for wind data.</b> Tap Refresh when you have bars.';return false;}
 }
 
 function render(){
@@ -248,12 +249,15 @@ function onOrient(e){
   if(hd==null) return;
   heading=((hd+((screen.orientation&&screen.orientation.angle)||0))%360+360)%360; updateRel();
 }
+const needsAsk=typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function';
+function compassLabel(){$('btnCompass').textContent=compassOn?'Compass on':'Turn on compass';}
+compassLabel();
 $('btnCompass').onclick=async()=>{
-  if(compassOn){compassOn=false;$('btnCompass').classList.remove('on');removeEventListener('deviceorientation',onOrient);removeEventListener('deviceorientationabsolute',onOrient);updateRel();return;}
+  if(compassOn){compassOn=false;$('btnCompass').classList.remove('on');removeEventListener('deviceorientation',onOrient);removeEventListener('deviceorientationabsolute',onOrient);compassLabel();updateRel();return;}
   try{
     if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
       if(await DeviceOrientationEvent.requestPermission()!=='granted') throw 0;}
-    compassOn=true;$('btnCompass').classList.add('on');
+    compassOn=true;$('btnCompass').classList.add('on');compassLabel();
     addEventListener('ondeviceorientationabsolute' in window?'deviceorientationabsolute':'deviceorientation',onOrient);
     updateRel();
   }catch(_){ $('rel').innerHTML='<span>Compass</span>Motion access blocked'; }
@@ -268,8 +272,16 @@ function startGps(){
   watchId=navigator.geolocation.watchPosition(p=>{if(src==='pin')return;src='gps';setPos(p.coords.latitude,p.coords.longitude,first);first=false;},
     ()=>{useCenter();},{enableHighAccuracy:true,maximumAge:30000,timeout:15000});
 }
-$('btnGps').onclick=()=>{pos=null;startGps();};
-$('btnRefresh').onclick=()=>fetchWx();
+function gpsBtn(){$('btnGps').hidden=(src==='gps');}
+$('btnGps').onclick=()=>{pos=null;src='gps';gpsBtn();$('status').textContent='Finding you…';startGps();};
+$('btnRefresh').onclick=async()=>{
+  const b=$('btnRefresh');b.disabled=true;b.textContent='Updating…';
+  const ok=await fetchWx();
+  b.textContent=ok?'Updated ✓':'No signal';
+  setTimeout(()=>{b.textContent='Refresh';b.disabled=false;},2000);
+};
+// Android/desktop: compass needs no permission tap, so start it automatically
+if(!needsAsk&&('ondeviceorientationabsolute' in window||'ondeviceorientation' in window)) $('btnCompass').click();
 setInterval(()=>{if(!document.hidden)fetchWx();},10*60e3);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&lastFetch&&Date.now()-lastFetch>5*60e3)fetchWx();});
 
