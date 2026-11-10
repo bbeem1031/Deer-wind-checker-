@@ -44,7 +44,7 @@ html,body{height:100%;margin:0;background:var(--ground);color:var(--bone);font-f
 .status b{color:var(--blaze);font-weight:600}
 
 /* center reticle like a scope crosshair, with wind speed under it */
-.reticle{position:fixed;left:50%;top:50%;z-index:450;transform:translate(-50%,-50%);pointer-events:none;text-align:center;filter:drop-shadow(0 1px 2px rgba(0,0,0,.8))}
+.reticle{position:fixed;left:50%;top:calc(50% + var(--dy,0px));z-index:450;transform:translate(-50%,-22px);pointer-events:none;text-align:center;filter:drop-shadow(0 1px 2px rgba(0,0,0,.8))}
 .reticle svg{display:block;margin:0 auto}
 .reticle div{font-family:var(--display);font-weight:600;font-size:18px;margin-top:2px}
 
@@ -146,7 +146,7 @@ let map,me,cone,pos=null,src='gps',wx=null,heading=null,compassOn=false,watchId=
 
 map=L.map('map',{zoomControl:false}).setView([41.03,-94.2],17);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:18,attribution:'Imagery © Esri · Wind: Open-Meteo'}).addTo(map);
-map.on('click',e=>{src='pin';setPos(e.latlng.lat,e.latlng.lng,false);});
+map.on('click',e=>{src='pin';if(accRing){map.removeLayer(accRing);accRing=null;}setPos(e.latlng.lat,e.latlng.lng,false);});
 map.on('zoomstart',()=>{plume=[];});
 
 function dest(lat,lon,brg,m){const R=6371000,d=m/R,b=brg*Math.PI/180,p1=lat*Math.PI/180,l1=lon*Math.PI/180;
@@ -157,11 +157,15 @@ function dest(lat,lon,brg,m){const R=6371000,d=m/R,b=brg*Math.PI/180,p1=lat*Math
 const standIcon=L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,34],
   html:'<div class="me"><svg width="14" height="16" viewBox="0 0 14 16"><path d="M2 1 V15 M12 1 V15 M2 4 H12 M2 8 H12 M2 12 H12" stroke="#ece6d6" stroke-width="2" fill="none"/></svg></div>'});
 
+let accRing=null,followUntil=0,bestAcc=1e9;
+function visDy(){const h1=document.querySelector('.top').offsetHeight,h2=$('deck').offsetHeight;return Math.round((h1-h2)/2);}
+function placeReticle(){document.documentElement.style.setProperty('--dy',visDy()+'px');}
+function centerOn(ll){map.setView(ll,Math.max(map.getZoom(),17),{animate:false});map.panBy([0,-visDy()],{animate:false});}
 function setPos(lat,lon,center){
   const moved=!pos||map.distance(pos,[lat,lon])>75;
   pos=[lat,lon]; plume=[]; gpsBtn&&setTimeout(gpsBtn);
   if(!me) me=L.marker(pos,{icon:standIcon,zIndexOffset:1000,interactive:false}).addTo(map); else me.setLatLng(pos);
-  if(center) map.setView(pos,17);
+  if(center) centerOn(pos);
   drawCone();
   if(moved||!lastFetch||Date.now()-lastFetch>10*60e3) fetchWx();
 }
@@ -194,7 +198,7 @@ function render(){
   $('retSpd').textContent=`${mph} mph`;
   $('arrow').style.transform=`rotate(${from}deg)`;
   const t=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-  $('status').innerHTML=`${src==='gps'?'Your GPS spot':src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move`;
+  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move`;
   const h=wx.hourly,key=c.time.slice(0,13)+':00';let i=h.time.indexOf(key);if(i<0)i=0;
   let out='';
   for(let k=1;k<=12&&i+k<h.time.length;k++){
@@ -203,7 +207,7 @@ function render(){
     out+=`<div class="hr${diff>=45?' shift':''}"><div class="t">${hr}</div><svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${d} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg><div class="s">${Math.round(h.wind_speed_10m[j])}</div><div class="d">${card(d)}</div></div>`;
   }
   $('hours').innerHTML=out;
-  drawCone(); updateRel(); startFlow();
+  drawCone(); updateRel(); startFlow(); placeReticle();
 }
 
 const fmtT=s=>new Date(s).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
@@ -271,12 +275,20 @@ function useCenter(){ if(pos) return; src='center'; const c=map.getCenter(); set
 function startGps(){
   if(!navigator.geolocation){useCenter();return;}
   src='gps'; if(watchId!=null) navigator.geolocation.clearWatch(watchId);
-  let first=true;
-  watchId=navigator.geolocation.watchPosition(p=>{if(src==='pin')return;src='gps';setPos(p.coords.latitude,p.coords.longitude,first);first=false;},
-    ()=>{useCenter();},{enableHighAccuracy:true,maximumAge:30000,timeout:15000});
+  followUntil=Date.now()+25000; bestAcc=1e9;
+  watchId=navigator.geolocation.watchPosition(p=>{
+      if(src==='pin')return; src='gps';
+      const a=p.coords.accuracy||0, ll=[p.coords.latitude,p.coords.longitude];
+      const recenter=Date.now()<followUntil&&a<bestAcc; if(recenter) bestAcc=a;
+      setPos(ll[0],ll[1],recenter);
+      if(!accRing) accRing=L.circle(ll,{radius:a,color:'#7fb8ff',weight:1,opacity:.7,fillColor:'#7fb8ff',fillOpacity:.12,interactive:false}).addTo(map);
+      else {accRing.setLatLng(ll);accRing.setRadius(a);}
+      if(Date.now()<followUntil) $('status').textContent=`Locking GPS… ±${Math.round(a*1.094)} yd`;
+    },
+    ()=>{useCenter();},{enableHighAccuracy:true,maximumAge:0,timeout:20000});
 }
 function gpsBtn(){$('btnGps').hidden=(src==='gps');}
-$('btnGps').onclick=()=>{pos=null;src='gps';gpsBtn();$('status').textContent='Finding you…';startGps();};
+$('btnGps').onclick=()=>{src='gps';gpsBtn();$('status').textContent='Finding you…';startGps();};
 $('btnRefresh').onclick=async()=>{
   const b=$('btnRefresh');b.disabled=true;b.textContent='Updating…';
   const ok=await fetchWx();
@@ -291,7 +303,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&lastFetch
 /* particle layer: field dots drift across the whole map, scent plume streams off the stand */
 const cv=$('flow'),cx=cv.getContext('2d');let field=[],plume=[],raf=null,W=0,H=0;
 function size(){const r=devicePixelRatio||1;W=innerWidth;H=innerHeight;cv.width=W*r;cv.height=H*r;cx.setTransform(r,0,0,r,0,0);
-  document.documentElement.style.setProperty('--deckH',($('deck').offsetHeight+4)+'px');
+  document.documentElement.style.setProperty('--deckH',($('deck').offsetHeight+4)+'px'); placeReticle();
   field=Array.from({length:Math.round(W*H/1800)},()=>newDot(true));}
 const COLORS=['255,224,80','255,236,120','196,240,96','170,230,80'];
 function newDot(any){return{x:Math.random()*W,y:Math.random()*H,a:any?Math.random()*150|0:0,life:110+Math.random()*90,s:.55+Math.random()*.9,r:Math.random()<.25?1.9:1.3,c:COLORS[Math.random()*4|0]};}
