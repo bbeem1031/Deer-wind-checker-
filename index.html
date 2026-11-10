@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<meta name="theme-color" content="#14130f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Stand Wind</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: full-bleed satellite map with a live particle layer; slim readout on top, compact deck at bottom */
+:root{
+  --ground:#14130f; --panel:rgba(20,19,15,.82); --line:rgba(236,230,214,.16);
+  --bone:#ece6d6; --dim:#a39d8c; --blaze:#ff6a13;
+  --display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --body:"Barlow",system-ui,-apple-system,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--ground);color:var(--bone);font-family:var(--body);-webkit-tap-highlight-color:transparent;overflow:hidden}
+#map{position:fixed;inset:0;background:#1b1a14}
+#flow{position:fixed;inset:0;pointer-events:none;z-index:400}
+.leaflet-control-attribution{background:rgba(20,19,15,.55)!important;color:var(--dim)!important;font-size:9px}
+.leaflet-control-attribution a{color:var(--dim)!important}
+.leaflet-bottom{bottom:var(--deckH,190px)!important}
+
+.top{position:fixed;top:0;left:0;right:0;z-index:500;padding:calc(env(safe-area-inset-top,0px) + 8px) max(14px,env(safe-area-inset-right,0px)) 18px max(14px,env(safe-area-inset-left,0px));
+  background:linear-gradient(var(--panel) 60%,transparent);pointer-events:none}
+.row{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.big{font-family:var(--display);font-weight:700;font-size:46px;line-height:.9}
+.big small{font-size:20px;color:var(--dim);font-weight:600;margin-left:5px}
+.stat{font-family:var(--display);font-size:20px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat span{display:block;font-family:var(--body);font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+.status{margin-top:5px;font-size:12px;color:var(--dim)}
+.status b{color:var(--blaze);font-weight:600}
+
+/* center reticle like a scope crosshair, with wind speed under it */
+.reticle{position:fixed;left:50%;top:50%;z-index:450;transform:translate(-50%,-50%);pointer-events:none;text-align:center;filter:drop-shadow(0 1px 2px rgba(0,0,0,.8))}
+.reticle svg{display:block;margin:0 auto}
+.reticle div{font-family:var(--display);font-weight:600;font-size:18px;margin-top:2px}
+
+.bottom{position:fixed;left:0;right:0;bottom:0;z-index:500;padding:18px max(14px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 10px) max(14px,env(safe-area-inset-left,0px));
+  background:linear-gradient(transparent,var(--panel) 22%)}
+.deck{display:flex;gap:12px;align-items:center}
+#dial{width:96px;height:96px;flex:none}
+.side{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
+.rel{font-family:var(--display);font-size:22px;font-weight:600;line-height:1.05}
+.rel span{display:block;font-family:var(--body);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);font-weight:500}
+.btns{display:flex;gap:7px;flex-wrap:wrap}
+button{font-family:var(--body);font-size:13px;font-weight:600;color:var(--bone);background:rgba(236,230,214,.08);border:1px solid var(--line);border-radius:9px;padding:7px 11px;cursor:pointer}
+button.on{background:var(--blaze);border-color:var(--blaze);color:#1a0d04}
+button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
+
+.hours{margin-top:10px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+.hours::-webkit-scrollbar{display:none}
+.hr{flex:none;width:48px;text-align:center;padding:5px 0;border-radius:8px;background:rgba(236,230,214,.06);border:1px solid transparent}
+.hr.shift{border-color:var(--blaze)}
+.hr .t{font-size:10px;color:var(--dim)}
+.hr svg{display:block;margin:2px auto}
+.hr .s{font-family:var(--display);font-weight:600;font-size:14px;font-variant-numeric:tabular-nums}
+.hr .d{font-size:9px;color:var(--dim)}
+.me{width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--blaze);border:3px solid var(--bone);box-shadow:0 2px 6px rgba(0,0,0,.6);display:grid;place-items:center}
+.me svg{transform:rotate(45deg)}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<canvas id="flow"></canvas>
+<div class="reticle" aria-hidden="true">
+  <svg width="44" height="44" viewBox="0 0 44 44"><g stroke="#ece6d6" stroke-width="2.5" stroke-linecap="round"><path d="M22 4 V16 M22 28 V40 M4 22 H16 M28 22 H40"/></g><circle cx="22" cy="22" r="2.5" fill="#ece6d6"/></svg>
+  <div id="retSpd">-- mph</div>
+</div>
+
+<header class="top">
+  <div class="row">
+    <div class="big" id="dirBig">--<small id="degSmall"></small></div>
+    <div class="stat" id="spd">-- mph<span>Wind</span></div>
+    <div class="stat" id="gst">--<span>Gusts</span></div>
+    <div class="stat" id="tmp">--<span>Temp</span></div>
+  </div>
+  <div class="status" id="status">Getting your location…</div>
+</header>
+
+<section class="bottom" id="deck">
+  <div class="deck">
+    <svg id="dial" viewBox="0 0 200 200" aria-label="Wind compass">
+      <circle cx="100" cy="100" r="94" fill="rgba(20,19,15,.75)" stroke="rgba(236,230,214,.2)" stroke-width="3"/>
+      <g id="ring" style="transform-origin:100px 100px">
+        <g id="ticks"></g>
+        <text x="100" y="34" text-anchor="middle" fill="#ff6a13" font-family="Barlow Condensed" font-weight="700" font-size="28">N</text>
+        <g id="arrow" style="transition:transform .6s ease;transform-origin:100px 100px">
+          <path d="M100 46 L100 146" stroke="#ece6d6" stroke-width="9" stroke-linecap="round"/>
+          <path d="M100 166 L82 138 L118 138 Z" fill="#ece6d6"/>
+          <circle cx="100" cy="46" r="10" fill="#ff6a13"/>
+        </g>
+      </g>
+      <path d="M100 2 L91 17 L109 17 Z" fill="#ff6a13" id="facing" opacity="0"/>
+    </svg>
+    <div class="side">
+      <div class="rel" id="rel"><span>Scent drifts toward</span>--</div>
+      <div class="btns">
+        <button id="btnCompass" type="button">Compass</button>
+        <button id="btnGps" type="button">My GPS</button>
+        <button id="btnRefresh" type="button">Refresh</button>
+      </div>
+    </div>
+  </div>
+  <div class="hours" id="hours"></div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const PTS=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+const card=d=>PTS[Math.round(((d%360)+360)%360/22.5)%16];
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SCENT_M=365; // ~400 yards
+
+let map,me,cone,pos=null,src='gps',wx=null,heading=null,compassOn=false,watchId=null,lastFetch=null;
+
+(()=>{let s='';for(let a=0;a<360;a+=15){const r1=a%45?84:76,t=a*Math.PI/180;
+ s+=`<line x1="${100+r1*Math.sin(t)}" y1="${100-r1*Math.cos(t)}" x2="${100+92*Math.sin(t)}" y2="${100-92*Math.cos(t)}" stroke="rgba(236,230,214,.4)" stroke-width="${a%45?2:4}"/>`;}
+ $('ticks').innerHTML=s;})();
+
+map=L.map('map',{zoomControl:false}).setView([41.03,-94.2],17);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:18,attribution:'Imagery © Esri · Wind: Open-Meteo'}).addTo(map);
+map.on('click',e=>{src='pin';setPos(e.latlng.lat,e.latlng.lng,false);});
+map.on('zoomstart',()=>{plume=[];});
+
+function dest(lat,lon,brg,m){const R=6371000,d=m/R,b=brg*Math.PI/180,p1=lat*Math.PI/180,l1=lon*Math.PI/180;
+ const p2=Math.asin(Math.sin(p1)*Math.cos(d)+Math.cos(p1)*Math.sin(d)*Math.cos(b));
+ const l2=l1+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(p1),Math.cos(d)-Math.sin(p1)*Math.sin(p2));
+ return [p2*180/Math.PI,l2*180/Math.PI];}
+
+const standIcon=L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,34],
+  html:'<div class="me"><svg width="14" height="16" viewBox="0 0 14 16"><path d="M2 1 V15 M12 1 V15 M2 4 H12 M2 8 H12 M2 12 H12" stroke="#ece6d6" stroke-width="2" fill="none"/></svg></div>'});
+
+function setPos(lat,lon,center){
+  const moved=!pos||map.distance(pos,[lat,lon])>75;
+  pos=[lat,lon]; plume=[];
+  if(!me) me=L.marker(pos,{icon:standIcon,zIndexOffset:1000,interactive:false}).addTo(map); else me.setLatLng(pos);
+  if(center) map.setView(pos,17);
+  drawCone();
+  if(moved||!lastFetch||Date.now()-lastFetch>10*60e3) fetchWx();
+}
+
+function spreadDeg(){const c=wx.current;return Math.min(38,16+Math.max(0,c.wind_gusts_10m-c.wind_speed_10m)*1.5);}
+function drawCone(){
+  if(!pos||!wx) return;
+  const to=(wx.current.wind_direction_10m+180)%360,sp=spreadDeg(),pts=[pos];
+  for(let a=-sp;a<=sp;a+=3) pts.push(dest(pos[0],pos[1],to+a,SCENT_M));
+  pts.push(dest(pos[0],pos[1],to+sp,SCENT_M));
+  if(cone) cone.setLatLngs(pts);
+  else cone=L.polygon(pts,{color:'#ff6a13',weight:1.5,opacity:.55,fillColor:'#ff6a13',fillOpacity:.2,interactive:false}).addTo(map);
+}
+
+async function fetchWx(){
+  if(!pos) return;
+  $('status').textContent='Updating wind…';
+  const u=`https://api.open-meteo.com/v1/forecast?latitude=${pos[0].toFixed(4)}&longitude=${pos[1].toFixed(4)}&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto&forecast_days=2`;
+  try{const r=await fetch(u);if(!r.ok)throw 0;wx=await r.json();lastFetch=Date.now();render();}
+  catch(e){$('status').innerHTML='<b>No signal for wind data.</b> Tap Refresh when you have bars.';}
+}
+
+function render(){
+  const c=wx.current,from=Math.round(c.wind_direction_10m),mph=Math.round(c.wind_speed_10m);
+  $('dirBig').innerHTML=`${card(from)}<small>${from}°</small>`;
+  $('spd').innerHTML=`${mph} mph<span>From ${card(from)}</span>`;
+  $('gst').innerHTML=`${Math.round(c.wind_gusts_10m)} mph<span>Gusts</span>`;
+  $('tmp').innerHTML=`${Math.round(c.temperature_2m)}°F<span>Temp</span>`;
+  $('retSpd').textContent=`${mph} mph`;
+  $('arrow').style.transform=`rotate(${(from+180)%360}deg)`;
+  const t=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+  $('status').innerHTML=`${src==='gps'?'Your GPS spot':src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move`;
+  const h=wx.hourly,key=c.time.slice(0,13)+':00';let i=h.time.indexOf(key);if(i<0)i=0;
+  let out='';
+  for(let k=1;k<=12&&i+k<h.time.length;k++){
+    const j=i+k,d=h.wind_direction_10m[j],diff=Math.abs(((d-from+540)%360)-180);
+    const hr=new Date(h.time[j]).toLocaleTimeString([],{hour:'numeric'});
+    out+=`<div class="hr${diff>=45?' shift':''}"><div class="t">${hr}</div><svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${(d+180)%360} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg><div class="s">${Math.round(h.wind_speed_10m[j])}</div><div class="d">${card(d)}</div></div>`;
+  }
+  $('hours').innerHTML=out;
+  drawCone(); updateRel(); startFlow();
+}
+
+function updateRel(){
+  if(!wx) return;
+  const from=wx.current.wind_direction_10m;
+  $('ring').style.transform=compassOn&&heading!=null?`rotate(${-heading}deg)`:'';
+  $('facing').setAttribute('opacity',compassOn?1:0);
+  if(compassOn&&heading!=null){
+    const rel=((from-heading)%360+360)%360;
+    const names=['in your face','front-right','your right','back-right','at your back','back-left','your left','front-left'];
+    $('rel').innerHTML=`<span>Facing ${card(heading)} · wind hits you</span>${names[Math.round(rel/45)%8]}`;
+  }else if(compassOn){$('rel').innerHTML='<span>Compass</span>Hold phone flat, turn slowly';}
+  else $('rel').innerHTML=`<span>Scent drifts toward</span>${card((from+180)%360)} of your stand`;
+}
+
+/* compass */
+function onOrient(e){
+  let hd=null;
+  if(typeof e.webkitCompassHeading==='number') hd=e.webkitCompassHeading;
+  else if(e.absolute&&e.alpha!=null) hd=360-e.alpha;
+  if(hd==null) return;
+  heading=((hd+((screen.orientation&&screen.orientation.angle)||0))%360+360)%360; updateRel();
+}
+$('btnCompass').onclick=async()=>{
+  if(compassOn){compassOn=false;$('btnCompass').classList.remove('on');removeEventListener('deviceorientation',onOrient);removeEventListener('deviceorientationabsolute',onOrient);updateRel();return;}
+  try{
+    if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
+      if(await DeviceOrientationEvent.requestPermission()!=='granted') throw 0;}
+    compassOn=true;$('btnCompass').classList.add('on');
+    addEventListener('ondeviceorientationabsolute' in window?'deviceorientationabsolute':'deviceorientation',onOrient);
+    updateRel();
+  }catch(_){ $('rel').innerHTML='<span>Compass</span>Motion access blocked'; }
+};
+
+/* gps */
+function useCenter(){ if(pos) return; src='center'; const c=map.getCenter(); setPos(c.lat,c.lng,false); }
+function startGps(){
+  if(!navigator.geolocation){useCenter();return;}
+  src='gps'; if(watchId!=null) navigator.geolocation.clearWatch(watchId);
+  let first=true;
+  watchId=navigator.geolocation.watchPosition(p=>{if(src==='pin')return;src='gps';setPos(p.coords.latitude,p.coords.longitude,first);first=false;},
+    ()=>{useCenter();},{enableHighAccuracy:true,maximumAge:30000,timeout:15000});
+}
+$('btnGps').onclick=()=>{pos=null;startGps();};
+$('btnRefresh').onclick=()=>fetchWx();
+setInterval(()=>{if(!document.hidden)fetchWx();},10*60e3);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&lastFetch&&Date.now()-lastFetch>5*60e3)fetchWx();});
+
+/* particle layer: field dots drift across the whole map, scent plume streams off the stand */
+const cv=$('flow'),cx=cv.getContext('2d');let field=[],plume=[],raf=null,W=0,H=0;
+function size(){const r=devicePixelRatio||1;W=innerWidth;H=innerHeight;cv.width=W*r;cv.height=H*r;cx.setTransform(r,0,0,r,0,0);
+  document.documentElement.style.setProperty('--deckH',($('deck').offsetHeight+4)+'px');
+  field=Array.from({length:Math.round(W*H/1800)},()=>newDot(true));}
+const COLORS=['255,224,80','255,236,120','196,240,96','170,230,80'];
+function newDot(any){return{x:Math.random()*W,y:Math.random()*H,a:any?Math.random()*150|0:0,life:110+Math.random()*90,s:.55+Math.random()*.9,r:Math.random()<.25?1.9:1.3,c:COLORS[Math.random()*4|0]};}
+addEventListener('resize',size);size();
+
+function startFlow(){ if(reduce){drawStatic();return;} if(!raf) loop(); }
+function drawStatic(){cx.clearRect(0,0,W,H);for(const p of field){cx.fillStyle=`rgba(${p.c},.7)`;cx.beginPath();cx.arc(p.x,p.y,p.r,0,7);cx.fill();}}
+function dot(x,y,r,col,al){
+  cx.fillStyle=`rgba(${col},${al*.22})`;cx.beginPath();cx.arc(x,y,r*2.6,0,7);cx.fill();
+  cx.fillStyle=`rgba(${col},${al})`;cx.beginPath();cx.arc(x,y,r,0,7);cx.fill();
+}
+function gauss(){return (Math.random()+Math.random()+Math.random()-1.5)/1.5;}
+function loop(){
+  raf=requestAnimationFrame(loop);
+  if(!wx) return;
+  const c=wx.current,to=(c.wind_direction_10m+180)*Math.PI/180,mph=Math.min(c.wind_speed_10m,30);
+  const ux=Math.sin(to),uy=-Math.cos(to),base=.22+mph*.075;
+  cx.clearRect(0,0,W,H);
+  for(const p of field){
+    p.x+=ux*base*p.s;p.y+=uy*base*p.s;p.a++;
+    if(p.a>p.life||p.x<-10||p.y<-10||p.x>W+10||p.y>H+10){Object.assign(p,newDot(false));}
+    dot(p.x,p.y,p.r,p.c,Math.sin(Math.PI*p.a/p.life)*.85);
+  }
+  if(pos){
+    const o=map.latLngToContainerPoint(pos);
+    const e=map.latLngToContainerPoint(dest(pos[0],pos[1],(c.wind_direction_10m+180)%360,SCENT_M));
+    const len=Math.hypot(e.x-o.x,e.y-o.y), sp=spreadDeg()*Math.PI/180;
+    for(let k=0;k<4;k++){
+      const ang=to+gauss()*sp*.75, v=(base*2.4+len/260)*(.75+Math.random()*.5);
+      plume.push({ox:0,oy:0,dx:Math.sin(ang)*v,dy:-Math.cos(ang)*v,d:0,r:1.2+Math.random()*1.1});
+    }
+    if(plume.length>600) plume.splice(0,plume.length-600);
+    for(let i=plume.length-1;i>=0;i--){
+      const q=plume[i]; q.ox+=q.dx;q.oy+=q.dy;q.d=Math.hypot(q.ox,q.oy);
+      if(q.d>len){plume.splice(i,1);continue;}
+      const f=q.d/len, col=f<.35?'255,226,90':f<.7?'255,180,60':'255,130,40';
+      dot(o.x+q.ox,o.y+q.oy,q.r,col,(1-f)*.95);
+    }
+  }
+}
+
+startGps();
+setTimeout(()=>{ if(!pos) useCenter(); },16000);
+</script>
+</body>
+</html>
