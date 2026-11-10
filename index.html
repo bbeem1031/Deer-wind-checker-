@@ -60,7 +60,9 @@ button{font-family:var(--body);font-size:13px;font-weight:600;color:var(--bone);
 button.on{background:var(--blaze);border-color:var(--blaze);color:#1a0d04}
 button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
 
-.hours{margin-top:10px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+.hlbl{margin-top:9px;font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+.hlbl b{color:var(--blaze);font-weight:600}
+.hours{margin-top:5px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
 .hours::-webkit-scrollbar{display:none}
 .hr{flex:none;width:48px;text-align:center;padding:5px 0;border-radius:8px;background:rgba(236,230,214,.06);border:1px solid transparent}
 .hr.shift{border-color:var(--blaze)}
@@ -120,6 +122,7 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
       </div>
     </div>
   </div>
+  <div class="hlbl">Next 12 hrs · <b>orange</b> = wind shifts 45°+ from now</div>
   <div class="hours" id="hours"></div>
 </section>
 
@@ -185,7 +188,7 @@ function render(){
   $('tmp').innerHTML=`${Math.round(c.temperature_2m)}°F<span>Temp</span>`;
   renderSky();
   $('retSpd').textContent=`${mph} mph`;
-  $('arrow').style.transform=`rotate(${(from+180)%360}deg)`;
+  $('arrow').style.transform=`rotate(${from}deg)`;
   const t=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
   $('status').innerHTML=`${src==='gps'?'Your GPS spot':src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move`;
   const h=wx.hourly,key=c.time.slice(0,13)+':00';let i=h.time.indexOf(key);if(i<0)i=0;
@@ -193,7 +196,7 @@ function render(){
   for(let k=1;k<=12&&i+k<h.time.length;k++){
     const j=i+k,d=h.wind_direction_10m[j],diff=Math.abs(((d-from+540)%360)-180);
     const hr=new Date(h.time[j]).toLocaleTimeString([],{hour:'numeric'});
-    out+=`<div class="hr${diff>=45?' shift':''}"><div class="t">${hr}</div><svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${(d+180)%360} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg><div class="s">${Math.round(h.wind_speed_10m[j])}</div><div class="d">${card(d)}</div></div>`;
+    out+=`<div class="hr${diff>=45?' shift':''}"><div class="t">${hr}</div><svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${d} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg><div class="s">${Math.round(h.wind_speed_10m[j])}</div><div class="d">${card(d)}</div></div>`;
   }
   $('hours').innerHTML=out;
   drawCone(); updateRel(); startFlow();
