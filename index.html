@@ -34,10 +34,28 @@ html,body{height:100%;margin:0;background:var(--ground);color:var(--bone);font-f
 .big small{font-size:20px;color:var(--dim);font-weight:600;margin-left:5px}
 .stat{font-family:var(--display);font-size:20px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
 .stat span{display:block;font-family:var(--body);font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
-.sky{margin-top:8px;display:inline-flex;gap:0;border:1px solid var(--line);border-radius:10px;background:rgba(20,19,15,.7);overflow:hidden;max-width:100%}
-.sky>div{padding:5px 10px;font-family:var(--display);font-size:17px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
-.sky>div+div{border-left:1px solid var(--line)}
+.sky{margin-top:8px;display:inline-flex;gap:0;border:1px solid var(--line);border-radius:10px;background:rgba(20,19,15,.7);overflow:hidden;max-width:100%;pointer-events:auto}
+.sky>button{background:none;border:0;border-radius:0;color:var(--bone);text-align:left;cursor:pointer;padding:5px 10px;font-family:var(--display);font-size:17px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sky>button+button{border-left:1px solid var(--line)}
 .sky span{display:block;font-family:var(--body);font-size:9px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+.sky span::after{content:" ›";color:var(--blaze)}
+.sheet-bg{position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.sheet{width:100%;max-width:440px;background:#1d1b15;border:1px solid var(--line);border-radius:14px;padding:14px 14px 16px;box-shadow:0 12px 40px rgba(0,0,0,.6)}
+.sheet h2{margin:0;font-family:var(--display);font-size:24px;font-weight:700;letter-spacing:.01em}
+.sheet .sub{font-size:12px;color:var(--dim);margin-top:2px}
+.sheet-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px}
+.x{font-size:20px;line-height:1;padding:4px 10px}
+.suntbl{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.suntbl th{font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);text-align:left;padding:4px 6px}
+.suntbl td{font-family:var(--display);font-size:18px;font-weight:600;padding:8px 6px;border-top:1px solid var(--line)}
+.suntbl td.l{font-family:var(--body);font-size:12px;font-weight:500;color:var(--dim)}
+.suntbl tr.today td{color:var(--blaze)}
+.pchart{width:100%;height:auto;display:block}
+.pdays{display:grid;grid-template-columns:repeat(auto-fit,minmax(56px,1fr));gap:6px;margin-top:10px}
+.pdays div{background:rgba(236,230,214,.06);border-radius:8px;padding:6px 4px;text-align:center}
+.pdays b{display:block;font-family:var(--display);font-size:16px;font-variant-numeric:tabular-nums}
+.pdays span{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+.pdays i{font-style:normal;font-size:11px;color:var(--blaze)}
 .sky em{font-style:normal;font-size:13px;color:var(--blaze);margin-left:3px}
 .legal{margin-top:4px;font-size:11px;color:var(--dim)}
 .status{margin-top:5px;font-size:12px;color:var(--dim)}
@@ -80,6 +98,7 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
 </head>
 <body>
 <div id="map"></div>
+<div class="sheet-bg" id="sheetBg" hidden><div class="sheet" role="dialog" aria-modal="true"><div class="sheet-hd"><div><h2 id="sheetT"></h2><div class="sub" id="sheetS"></div></div><button type="button" class="x" id="sheetX" aria-label="Close">×</button></div><div id="sheetB"></div></div></div>
 <canvas id="flow"></canvas>
 <div class="reticle" aria-hidden="true">
   <svg width="44" height="44" viewBox="0 0 44 44"><g stroke="#ece6d6" stroke-width="2.5" stroke-linecap="round"><path d="M22 4 V16 M22 28 V40 M4 22 H16 M28 22 H40"/></g><circle cx="22" cy="22" r="2.5" fill="#ece6d6"/></svg>
@@ -94,9 +113,9 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
     <div class="stat" id="tmp">--<span>Temp</span></div>
   </div>
   <div class="sky">
-    <div id="baro">--<span>Pressure</span></div>
-    <div id="rise">--<span>Sunrise</span></div>
-    <div id="set">--<span>Sunset</span></div>
+    <button type="button" id="baro">--<span>Pressure</span></button>
+    <button type="button" id="rise">--<span>Sunrise</span></button>
+    <button type="button" id="set">--<span>Sunset</span></button>
   </div>
   <div class="legal" id="legal"></div>
   <div class="viewing" id="viewing" hidden></div>
@@ -194,7 +213,7 @@ function drawCone(){
 async function fetchWx(){
   if(!pos) return;
   $('status').textContent='Updating wind…';
-  const u=`https://api.open-meteo.com/v1/forecast?latitude=${pos[0].toFixed(4)}&longitude=${pos[1].toFixed(4)}&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl&daily=sunrise,sunset&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto&forecast_days=2`;
+  const u=`https://api.open-meteo.com/v1/forecast?latitude=${pos[0].toFixed(4)}&longitude=${pos[1].toFixed(4)}&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl&daily=sunrise,sunset&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto&forecast_days=6`;
   try{const r=await fetch(u);if(!r.ok)throw 0;wx=await r.json();lastFetch=Date.now();render();return true;}
   catch(e){$('status').innerHTML='<b>No signal for wind data.</b> Tap Refresh when you have bars.';return false;}
 }
@@ -248,10 +267,8 @@ function renderSky(){
   }
   $('baro').innerHTML=`${inHg(c.pressure_msl).toFixed(2)}${trend}<span>Pressure inHg · 3 hr</span>`;
   // next sunrise / sunset
-  const nRise=d.sunrise.find(t=>t>now)||d.sunrise[d.sunrise.length-1];
-  const nSet=d.sunset.find(t=>t>now)||d.sunset[d.sunset.length-1];
-  $('rise').innerHTML=`${fmtT(nRise)}<span>Sunrise${nRise.slice(0,10)!==now.slice(0,10)?' tmrw':''}</span>`;
-  $('set').innerHTML=`${fmtT(nSet)}<span>Sunset${nSet.slice(0,10)!==now.slice(0,10)?' tmrw':''}</span>`;
+  $('rise').innerHTML=`${fmtT(d.sunrise[0])}<span>Sunrise</span>`;
+  $('set').innerHTML=`${fmtT(d.sunset[0])}<span>Sunset</span>`;
   // Iowa deer shooting hours: 30 min before sunrise to 30 min after sunset
   const day=d.sunset.findIndex(t=>shift(t,30)>new Date(now));
   const k=day<0?d.sunset.length-1:day;
@@ -259,6 +276,58 @@ function renderSky(){
   const t=x=>x.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
   $('legal').textContent=`Shooting light ${lbl.toLowerCase()}: ${t(shift(d.sunrise[k],-30))} – ${t(shift(d.sunset[k],30))}`;
 }
+const inHg=x=>x*0.02953;
+const dayName=(s,i)=>i===0?'Today':i===1?'Tomorrow':new Date(s+'T12:00').toLocaleDateString([],{weekday:'long'});
+function openSheet(title,sub,html){$('sheetT').textContent=title;$('sheetS').textContent=sub;$('sheetB').innerHTML=html;$('sheetBg').hidden=false;}
+function closeSheet(){$('sheetBg').hidden=true;}
+$('sheetX').onclick=closeSheet;
+$('sheetBg').addEventListener('click',e=>{if(e.target===$('sheetBg'))closeSheet();});
+addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet();});
+function sunSheet(){
+  if(!wx) return;
+  const d=wx.daily,t=x=>x.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+  let rows='';
+  for(let i=0;i<Math.min(4,d.time.length);i++){
+    rows+=`<tr class="${i===0?'today':''}"><td class="l">${dayName(d.time[i],i)}</td><td>${fmtT(d.sunrise[i])}</td><td>${fmtT(d.sunset[i])}</td><td class="l">${t(shift(d.sunrise[i],-30))} – ${t(shift(d.sunset[i],30))}</td></tr>`;
+  }
+  openSheet('Sunrise & sunset','Today and the next 3 days',`<div style="overflow-x:auto"><table class="suntbl"><tr><th>Day</th><th>Sunrise</th><th>Sunset</th><th>Shooting light</th></tr>${rows}</table></div>`);
+}
+function pressureSheet(){
+  if(!wx) return;
+  const h=wx.hourly,c=wx.current,key=c.time.slice(0,13)+':00';
+  let i0=h.time.indexOf(key);if(i0<0)i0=0;
+  const end=Math.min(h.time.length-1,i0+120);
+  const pts=[];for(let j=i0;j<=end;j++) if(h.pressure_msl[j]!=null) pts.push({t:h.time[j],p:inHg(h.pressure_msl[j])});
+  pts[0].p=inHg(c.pressure_msl);
+  const VW=340,VH=170,L=36,R=8,T=14,B=26,pw=VW-L-R,ph=VH-T-B;
+  let lo=Math.min(...pts.map(q=>q.p)),hi=Math.max(...pts.map(q=>q.p));
+  const pad=Math.max(.04,(hi-lo)*.15);lo=Math.floor((lo-pad)*20)/20;hi=Math.ceil((hi+pad)*20)/20;
+  const X=k=>L+pw*k/(pts.length-1),Y=p=>T+ph*(1-(p-lo)/(hi-lo));
+  let line='';pts.forEach((q,k)=>line+=`${k?'L':'M'}${X(k).toFixed(1)} ${Y(q.p).toFixed(1)}`);
+  const area=line+`L${X(pts.length-1).toFixed(1)} ${T+ph}L${L} ${T+ph}Z`;
+  let grid='';const steps=4;
+  for(let g=0;g<=steps;g++){const v=lo+(hi-lo)*g/steps,y=Y(v);
+    grid+=`<line x1="${L}" x2="${VW-R}" y1="${y}" y2="${y}" stroke="rgba(236,230,214,.1)"/><text x="${L-5}" y="${y+3.5}" text-anchor="end" font-size="10" fill="#a39d8c">${v.toFixed(2)}</text>`;}
+  let days='';
+  pts.forEach((q,k)=>{if(q.t.endsWith('T00:00')){const x=X(k);
+    days+=`<line x1="${x}" x2="${x}" y1="${T}" y2="${T+ph}" stroke="rgba(236,230,214,.18)" stroke-dasharray="3 3"/><text x="${x+4}" y="${VH-8}" font-size="10" fill="#a39d8c">${new Date(q.t).toLocaleDateString([],{weekday:'short'})}</text>`;}});
+  const svg=`<svg class="pchart" viewBox="0 0 ${VW} ${VH}" font-family="Barlow,system-ui,sans-serif">${grid}${days}
+    <path d="${area}" fill="rgba(255,106,19,.12)"/><path d="${line}" fill="none" stroke="#ece6d6" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="${X(0)}" cy="${Y(pts[0].p)}" r="4.5" fill="#ff6a13" stroke="#1d1b15" stroke-width="2"/>
+    <text x="${X(0)+8}" y="${Y(pts[0].p)-8}" font-size="11" font-weight="600" fill="#ff6a13">Now ${pts[0].p.toFixed(2)}</text></svg>`;
+  // per-day summary: midday value and change across the day
+  const d=wx.daily;let tiles='';
+  for(let i=0;i<Math.min(6,d.time.length);i++){
+    const idx=h.time.map((t,j)=>t.startsWith(d.time[i])?j:-1).filter(j=>j>=0&&h.pressure_msl[j]!=null);
+    if(!idx.length) continue;
+    const a=inHg(h.pressure_msl[idx[0]]),b=inHg(h.pressure_msl[idx[idx.length-1]]),dl=b-a;
+    const noon=idx.find(j=>h.time[j].endsWith('T12:00'))??idx[idx.length>>1];
+    const tr=dl>.03?'▲ rising':dl<-.03?'▼ falling':'steady';
+    tiles+=`<div><span>${i===0?'Today':new Date(d.time[i]+'T12:00').toLocaleDateString([],{weekday:'short'})}</span><b>${inHg(h.pressure_msl[noon]).toFixed(2)}</b><i>${tr}</i></div>`;
+  }
+  openSheet('Barometric pressure','inHg · now through the next 5 days',svg+`<div class="pdays">${tiles}</div>`);
+}
+$('baro').onclick=pressureSheet;$('rise').onclick=sunSheet;$('set').onclick=sunSheet;
 function updateRel(){
   if(!wx) return;
   const from=view().d;
