@@ -34,6 +34,12 @@ html,body{height:100%;margin:0;background:var(--ground);color:var(--bone);font-f
 .big small{font-size:20px;color:var(--dim);font-weight:600;margin-left:5px}
 .stat{font-family:var(--display);font-size:20px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
 .stat span{display:block;font-family:var(--body);font-size:10px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+.sky{margin-top:8px;display:inline-flex;gap:0;border:1px solid var(--line);border-radius:10px;background:rgba(20,19,15,.7);overflow:hidden;max-width:100%}
+.sky>div{padding:5px 10px;font-family:var(--display);font-size:17px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sky>div+div{border-left:1px solid var(--line)}
+.sky span{display:block;font-family:var(--body);font-size:9px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+.sky em{font-style:normal;font-size:13px;color:var(--blaze);margin-left:3px}
+.legal{margin-top:4px;font-size:11px;color:var(--dim)}
 .status{margin-top:5px;font-size:12px;color:var(--dim)}
 .status b{color:var(--blaze);font-weight:600}
 
@@ -81,6 +87,12 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
     <div class="stat" id="gst">--<span>Gusts</span></div>
     <div class="stat" id="tmp">--<span>Temp</span></div>
   </div>
+  <div class="sky">
+    <div id="baro">--<span>Pressure</span></div>
+    <div id="rise">--<span>Sunrise</span></div>
+    <div id="set">--<span>Sunset</span></div>
+  </div>
+  <div class="legal" id="legal"></div>
   <div class="status" id="status">Getting your location…</div>
 </header>
 
@@ -160,7 +172,7 @@ function drawCone(){
 async function fetchWx(){
   if(!pos) return;
   $('status').textContent='Updating wind…';
-  const u=`https://api.open-meteo.com/v1/forecast?latitude=${pos[0].toFixed(4)}&longitude=${pos[1].toFixed(4)}&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto&forecast_days=2`;
+  const u=`https://api.open-meteo.com/v1/forecast?latitude=${pos[0].toFixed(4)}&longitude=${pos[1].toFixed(4)}&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl&daily=sunrise,sunset&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto&forecast_days=2`;
   try{const r=await fetch(u);if(!r.ok)throw 0;wx=await r.json();lastFetch=Date.now();render();}
   catch(e){$('status').innerHTML='<b>No signal for wind data.</b> Tap Refresh when you have bars.';}
 }
@@ -171,6 +183,7 @@ function render(){
   $('spd').innerHTML=`${mph} mph<span>From ${card(from)}</span>`;
   $('gst').innerHTML=`${Math.round(c.wind_gusts_10m)} mph<span>Gusts</span>`;
   $('tmp').innerHTML=`${Math.round(c.temperature_2m)}°F<span>Temp</span>`;
+  renderSky();
   $('retSpd').textContent=`${mph} mph`;
   $('arrow').style.transform=`rotate(${(from+180)%360}deg)`;
   const t=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
@@ -186,6 +199,31 @@ function render(){
   drawCone(); updateRel(); startFlow();
 }
 
+const fmtT=s=>new Date(s).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+const shift=(s,min)=>new Date(new Date(s).getTime()+min*60e3);
+function renderSky(){
+  const c=wx.current,h=wx.hourly,d=wx.daily,now=c.time;
+  // pressure in inHg with 3-hour trend
+  const inHg=x=>x*0.02953;
+  const key=now.slice(0,13)+':00',i=h.time.indexOf(key);
+  let trend='';
+  if(i>=3&&h.pressure_msl[i-3]!=null){
+    const dlt=inHg(c.pressure_msl)-inHg(h.pressure_msl[i-3]);
+    trend=dlt>0.02?'<em>▲ rising</em>':dlt<-0.02?'<em>▼ falling</em>':'<em>steady</em>';
+  }
+  $('baro').innerHTML=`${inHg(c.pressure_msl).toFixed(2)}${trend}<span>Pressure inHg · 3 hr</span>`;
+  // next sunrise / sunset
+  const nRise=d.sunrise.find(t=>t>now)||d.sunrise[d.sunrise.length-1];
+  const nSet=d.sunset.find(t=>t>now)||d.sunset[d.sunset.length-1];
+  $('rise').innerHTML=`${fmtT(nRise)}<span>Sunrise${nRise.slice(0,10)!==now.slice(0,10)?' tmrw':''}</span>`;
+  $('set').innerHTML=`${fmtT(nSet)}<span>Sunset${nSet.slice(0,10)!==now.slice(0,10)?' tmrw':''}</span>`;
+  // Iowa deer shooting hours: 30 min before sunrise to 30 min after sunset
+  const day=d.sunset.findIndex(t=>shift(t,30)>new Date(now));
+  const k=day<0?d.sunset.length-1:day;
+  const lbl=d.sunrise[k].slice(0,10)===now.slice(0,10)?'Today':'Tomorrow';
+  const t=x=>x.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+  $('legal').textContent=`Shooting light ${lbl.toLowerCase()}: ${t(shift(d.sunrise[k],-30))} – ${t(shift(d.sunset[k],30))}`;
+}
 function updateRel(){
   if(!wx) return;
   const from=wx.current.wind_direction_10m;
