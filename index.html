@@ -96,6 +96,9 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
 .sw.lo{background:#2878ff}.sw.hi{background:#ff5a28}
 .sw.ln{height:4px;width:18px;border-radius:2px;vertical-align:2px}.sw.ln.rise{background:#ff6a5a}.sw.ln.fall{background:#64b4ff}
 .poolTag{transform:translate(-50%,-30px);white-space:nowrap;font:600 12px/1 var(--body);color:#0d1a2a;background:#64b4ff;padding:4px 7px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+.mapTag{transform:translate(-50%,-50%);white-space:nowrap;font:700 12px/1 var(--body);padding:5px 8px;border-radius:7px;box-shadow:0 2px 8px rgba(0,0,0,.55);color:#0d1a2a;background:#64b4ff}
+.mapTag.rise{background:#ff6a5a;color:#2a0d08}.mapTag.wind{background:#ff6a13;color:#1a0d04;font-size:11px;padding:3px 7px;opacity:.9}
+.sw.ln.wind{background:#ff6a13}
 .thermal.rise{color:var(--rise)} .thermal.fall{color:var(--fall)}
 .hr .th{display:none;font-size:10px;font-weight:700;line-height:1;margin-top:2px}
 body.thermals .hr .th{display:block}
@@ -246,8 +249,15 @@ function drawCone(){
   pts.push(dest(pos[0],pos[1],to+sp,SCENT_M));
   if(cone) cone.setLatLngs(pts);
   else cone=L.polygon(pts,{color:'#ff6a13',weight:1.5,opacity:.55,fillColor:'#ff6a13',fillOpacity:.2,interactive:false}).addTo(map);
-  if(typeof drawFlow==='function'&&thermalsOn) drawFlow();
+  if(!windTag) windTag=L.marker(pts[Math.round(pts.length/2)],{interactive:false,icon:L.divIcon({className:'',iconSize:[0,0],html:'<div class="mapTag wind">Wind</div>'})}).addTo(map);
+  else windTag.setLatLng(pts[Math.round(pts.length/2)]);
+  if(typeof drawFlow==='function'&&thermalsOn){drawFlow();}
+  if(typeof styleCone==='function') styleCone();
 }
+let windTag=null;
+function styleCone(){if(!cone)return;const faint=thermalsOn&&!!scentEst;
+  cone.setStyle(faint?{fillOpacity:.06,opacity:.6,dashArray:'6 6'}:{fillOpacity:.2,opacity:.55,dashArray:null});
+  if(windTag){const el=windTag.getElement();if(el)el.style.display=faint?'none':'';}}
 
 async function fetchWx(){
   if(!pos) return;
@@ -261,7 +271,7 @@ function render(){
   if(selIdx()<0) selTime=null; // selected hour has passed or vanished
   renderSky();
   const t=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move · build 11/14h`;
+  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move · build 11/14i`;
   const c=wx.current,h=wx.hourly,key=c.time.slice(0,13)+':00';let i=h.time.indexOf(key);if(i<0)i=0;
   const arrow=d=>`<svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${d} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg>`;
   const thm=j=>{const q=thermalAt(j,h.wind_speed_10m[j]);return `<div class="th ${q.mode}">${q.mode==='rise'?'▲ rise':'▼ fall'}</div>`;};
@@ -339,7 +349,7 @@ async function loadElev(){
       g.gx.push((Z(r,k+1)-Z(r,k-1))/(kx*mx));g.gy.push((Z(r+1,k)-Z(r-1,k))/(ry*my));
     }
     g.zmin=Math.min(...z);g.zmax=Math.max(...z);
-    elev=g; drawTerrain(); buildTField(); renderThermal();
+    elev=g; buildTField(); renderThermal();
   }catch(e){ $('thermal').innerHTML='<b>Terrain didn’t load.</b><span>Thermals need a signal once to pull elevation. Toggle again when you have bars.</span>'; }
   elevBusy=false;
 }
@@ -394,45 +404,56 @@ function chev(a,brg,len,col,w,op){
   flowLayer.addLayer(L.polyline([a,tip],{color:col,weight:w,opacity:op,interactive:false,lineCap:'round'}));
   flowLayer.addLayer(L.polyline([l,tip,r],{color:col,weight:w,opacity:op,interactive:false,lineCap:'round',lineJoin:'round'}));
 }
+/* One estimate of where YOUR scent goes, from your stand outward.
+   Each 12 m step adds the near-ground wind (about half the 10 m forecast) and the thermal drift for the ground
+   under that spot (uphill when rising, downhill when falling, faster on steeper slopes). The band widens with
+   distance and gusts. If the air nearly stops in low ground on a falling thermal, the scent pools there. */
+let scentEst=null;
+function estimateScent(){
+  if(!pos||!wx||!elev) return null;
+  const v=view(),q=thermalAt(hourIdx(),v.s),rise=q.mode==='rise';
+  const to=(v.d+180)*Math.PI/180,ws=v.s*.447*.5,wx_=Math.sin(to)*ws,wy_=Math.cos(to)*ws;
+  const path=[pos],step=12;let p=pos,dist=0,pooled=false;
+  while(dist<SCENT_M){
+    let vx=wx_,vy=wy_;
+    const g=gradAt(p[0],p[1]);if(!g) break;
+    const m=Math.hypot(g.gx,g.gy);
+    if(m>.004){const ts=q.strength*(.3+Math.min(1,m/.08))*(rise?1:-1)/m;vx+=g.gx*ts;vy+=g.gy*ts;}
+    const spd=Math.hypot(vx,vy);
+    if(spd<.25){pooled=true;break;}
+    p=dest(p[0],p[1],(Math.atan2(vx,vy)*180/Math.PI+360)%360,step);dist+=step;path.push(p);
+  }
+  // thermal pull right at the stand, on its own
+  const g0=gradAt(pos[0],pos[1]);let pull=null;
+  if(g0){const m=Math.hypot(g0.gx,g0.gy);if(m>.004){const up=(Math.atan2(g0.gx,g0.gy)*180/Math.PI+360)%360;pull={brg:rise?up:(up+180)%360,slope:m*100};}}
+  const end=path[path.length-1];
+  const endBrg=(Math.atan2((end[1]-pos[1])*Math.cos(pos[0]*Math.PI/180),end[0]-pos[0])*180/Math.PI+360)%360;
+  return{path,pooled,pull,q,end,endBrg,windBrg:(v.d+180)%360,yd:Math.round(map.distance(pos,end)*1.094)};
+}
 function drawFlow(){
-  flowLayer.clearLayers();
-  const g=elev;if(!g||!wx||!thermalsOn) return;
-  const q=thermalAt(hourIdx(),view().s),rise=q.mode==='rise',col=rise?'#ff6a5a':'#64b4ff';
-  // arrow field every other grid node
-  for(let r=1;r<g.N-1;r+=2)for(let k=1;k<g.N-1;k+=2){
-    const i=r*g.N+k,m=Math.hypot(g.gx[i],g.gy[i]);if(m<.006) continue;
-    const up=(Math.atan2(g.gx[i],g.gy[i])*180/Math.PI+360)%360,brg=rise?up:(up+180)%360;
-    const lat=g.s+(g.n-g.s)*r/(g.N-1),lng=g.w+(g.e-g.w)*k/(g.N-1);
-    const cell=(g.n-g.s)*111320/(g.N-1);
-    const len=cell*(.3+Math.min(1,m/.08)*.45);
-    const a=dest(lat,lng,(brg+180)%360,len/2);
-    chev(a,brg,len,col,2,.3+.45*q.strength);
+  flowLayer.clearLayers();scentEst=null;thermPath=null;
+  if(!elev||!wx||!thermalsOn||!pos) return;
+  const est=estimateScent();if(!est||est.path.length<2) return;
+  scentEst=est;thermPath=est.path;
+  const col=est.q.mode==='rise'?'#ff6a5a':'#64b4ff';
+  // widening scent band around the path
+  const sp=Math.min(30,spreadDeg()*.8)*Math.PI/180,L_=[],R_=[];
+  for(let i=0;i<est.path.length;i++){
+    const a=est.path[Math.max(0,i-1)],b=est.path[Math.min(est.path.length-1,i+1)];
+    const brg=(Math.atan2((b[1]-a[1])*Math.cos(a[0]*Math.PI/180),b[0]-a[0])*180/Math.PI+360)%360;
+    const w=5+i*12*Math.tan(sp);
+    L_.push(dest(est.path[i][0],est.path[i][1],brg-90,w));R_.push(dest(est.path[i][0],est.path[i][1],brg+90,w));
   }
-  // your scent's thermal path: follow the slope from the stand
-  if(!pos) return;
-  const path=[pos];let p=pos,dist=0,pooled=false;
-  while(dist<450){
-    const gg=gradAt(p[0],p[1]);if(!gg) break;
-    const m=Math.hypot(gg.gx,gg.gy);if(m<.004){pooled=true;break;}
-    const up=(Math.atan2(gg.gx,gg.gy)*180/Math.PI+360)%360;
-    p=dest(p[0],p[1],rise?up:(up+180)%360,12);dist+=12;path.push(p);
-  }
-  if(path.length>2){
-    flowLayer.addLayer(L.polyline(path,{color:col,weight:12,opacity:.25,interactive:false,lineCap:'round',lineJoin:'round'}));
-    flowLayer.addLayer(L.polyline(path,{color:'#ffffff',weight:3.5,opacity:.95,interactive:false,lineCap:'round',lineJoin:'round',dashArray:'2 8'}));
-    flowLayer.addLayer(L.polyline(path,{color:col,weight:3,opacity:.95,interactive:false,lineCap:'round',lineJoin:'round'}));
-    for(let n=8;n<path.length;n+=8){const a=path[n-1],b=path[n];
-      const brg=(Math.atan2((b[1]-a[1])*Math.cos(a[0]*Math.PI/180),b[0]-a[0])*180/Math.PI+360)%360;
-      chev(dest(b[0],b[1],(brg+180)%360,9),brg,18,'#ffffff',3,.95);}
-    const end=path[path.length-1];
-    flowLayer.addLayer(L.circleMarker(end,{radius:7,color:'#fff',weight:2,fillColor:col,fillOpacity:.9,interactive:false}));
-    if(pooled&&!rise) flowLayer.addLayer(L.marker(end,{interactive:false,icon:L.divIcon({className:'',iconSize:[0,0],html:'<div class="poolTag">Scent pools here</div>'})}));
-  }
+  flowLayer.addLayer(L.polygon(L_.concat(R_.reverse()),{color:col,weight:2,opacity:.9,fillColor:col,fillOpacity:.28,interactive:false,lineJoin:'round'}));
+  flowLayer.addLayer(L.polyline(est.path,{color:'#ffffff',weight:2,opacity:.7,dashArray:'3 7',interactive:false}));
+  const tag=est.pooled&&est.q.mode==='fall'?`Scent pools here · ${est.yd} yd`:`Your scent · ${est.yd} yd`;
+  flowLayer.addLayer(L.marker(est.end,{interactive:false,icon:L.divIcon({className:'',iconSize:[0,0],html:`<div class="mapTag ${est.q.mode}">${tag}</div>`})}));
 }
 function renderThermal(){
   document.body.classList.toggle('thermals',thermalsOn);
-  if(thermalsOn){if(!map.hasLayer(thermLayer))thermLayer.addTo(map);if(!map.hasLayer(flowLayer))flowLayer.addTo(map);drawFlow();}
-  else{map.removeLayer(thermLayer);map.removeLayer(flowLayer);}
+  if(thermalsOn){if(!map.hasLayer(flowLayer))flowLayer.addTo(map);drawFlow();}
+  else{map.removeLayer(thermLayer);map.removeLayer(flowLayer);scentEst=null;thermPath=null;}
+  styleCone();
   $('btnThermal').classList.toggle('on',thermalsOn);
   $('thermal').hidden=!thermalsOn;
   if(!thermalsOn||!wx) return;
@@ -440,20 +461,14 @@ function renderThermal(){
   $('btnThermal').classList.toggle('fall',q.mode==='fall');
   const el=$('thermal');el.className='thermal '+q.mode;
   let at='Loading terrain…';
-  if(elev&&pos){
-    const g=gradAt(pos[0],pos[1]);
-    if(g){
-      const slope=Math.hypot(g.gx,g.gy)*100,up=(Math.atan2(g.gx,g.gy)*180/Math.PI+360)%360;
-      if(slope<.6) at=q.mode==='rise'?'Flat ground at your stand: scent lifts straight up and spreads out.':'Flat ground at your stand: scent pools and lingers low.';
-      else{const dir=q.mode==='rise'?up:(up+180)%360;
-        at=`At your stand: drifts ${q.mode==='rise'?'uphill':'downhill'} toward the ${card(dir)} (${slope.toFixed(slope<3?1:0)}% slope).`;}
-    }else at='Move the map over your stand to read its slope.';
-  }
-  const head=q.mode==='rise'?'scent rises uphill':'scent sinks downhill';
-  const flat=elev&&elev.zmax-elev.zmin<3;
-  const legend=flat?'<em class="lg">Ground here is nearly flat, so there is no slope for thermals to follow.</em>':
-    `<em class="lg"><i class="sw lo"></i>Low ground <i class="sw hi"></i>High ground <i class="sw ln ${q.mode}"></i>Your scent's thermal path</em>`;
-  el.innerHTML=`<b>Thermals: ${q.label} · ${head}</b><span>${at}${q.windNote?' '+q.windNote:''}</span>${elev?legend:''}`;
+  const est=scentEst;
+  if(est){
+    const diff=((est.endBrg-est.windBrg+540)%360)-180;
+    const bend=Math.abs(diff)<12?'straight with the wind':`bending ${card(est.endBrg)} of the wind as it ${q.mode==='rise'?'rises uphill':'sinks downhill'}`;
+    const pull=est.pull&&est.pull.slope>=.6?` Thermal pull at your stand: ${q.mode==='rise'?'uphill':'downhill'} to the ${card(est.pull.brg)}.`:' Your stand is on nearly flat ground, so thermals add little here.';
+    at=`Your scent heads ${card(est.endBrg)}, ${bend}${est.pooled&&q.mode==='fall'?`, and pools about ${est.yd} yd out`:`, about ${est.yd} yd`}.${pull}`;
+  }else if(elev&&pos) at='Move the map over your stand to read its slope.';
+  el.innerHTML=`<b>Thermals: ${q.label}</b><span>${at}${q.windNote?' '+q.windNote:''}</span><em class="lg"><i class="sw ln ${q.mode}"></i>Your scent (wind + thermals) <i class="sw ln wind"></i>Wind only</em>`;
 }
 $('btnThermal').onclick=()=>{thermalsOn=!thermalsOn;if(thermalsOn){tParts=[];if(needElevReload())loadElev();else buildTField();}renderThermal();};
 const fmtT=s=>new Date(s).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
@@ -628,7 +643,8 @@ function loop(){
     if(p.a>p.life||p.x<-10||p.y<-10||p.x>W+10||p.y>H+10){Object.assign(p,newDot(false));}
     dot(p.x,p.y,p.r,p.c,Math.sin(Math.PI*p.a/p.life)*.85);
   }
-  if(thermalsOn&&tField.length){
+  if(pos&&thermalsOn&&thermPath&&thermPath.length>2) drawScentDots(v);
+  if(false){
     const q=thermalAt(hourIdx(),v.s),sign=q.mode==='rise'?1:-1,col=q.mode==='rise'?'255,106,90':'100,180,255';
     for(const p of tParts){
       const cell=(tField[Math.round(p.y/TSTEP)]||[])[Math.round(p.x/TSTEP)];
@@ -638,6 +654,29 @@ function loop(){
       if(p.a>p.life||p.x<-10||p.y<-10||p.x>W+10||p.y>H+10) Object.assign(p,newT(false));
       const flat=!cell||cell.m<=.004;
       dot(p.x,p.y,p.r*(flat&&q.mode==='rise'?1+p.a/p.life:1),col,Math.sin(Math.PI*p.a/p.life)*(.5+.5*q.strength)*(flat?.6:1));
+    }
+  }
+}
+
+// bunched dots ride your scent band out from the stand; offsets in meters so zoom only scales them
+let sDots=[],sClock=0;
+function newBunch(){const n=8+(Math.random()*5|0),d=[];for(let k=0;k<n;k++)d.push({a:gauss()*5,c:gauss()*3,r:1.4+Math.random()*1.1});return d;}
+function drawScentDots(v){
+  const q=scentEst?scentEst.q:thermalAt(hourIdx(),v.s),col=q.mode==='rise'?'255,120,100':'130,195,255';
+  const pts=thermPath.map(ll=>map.latLngToContainerPoint(ll)),seg=12,total=(pts.length-1)*seg;
+  const o=pts[0],e=map.latLngToContainerPoint(dest(pos[0],pos[1],0,100)),k=Math.hypot(e.x-o.x,e.y-o.y)/100,ks=Math.max(k,.7);
+  const secs=Math.max(6,Math.min(14,14-v.s*.6)),step=total/(secs*60);
+  if(++sClock>=24){sClock=0;sDots.push({m:0,v:step*(.85+Math.random()*.3),d:newBunch()});}
+  for(let i=sDots.length-1;i>=0;i--){
+    const b=sDots[i];b.m+=b.v;if(b.m>total){sDots.splice(i,1);continue;}
+    const f=b.m/total,al=Math.min(1,b.m/10)*(1-Math.pow(f,2.2));
+    for(const d of b.d){
+      const mm=Math.max(0,Math.min(total-.01,b.m+d.a)),n=Math.min(pts.length-2,Math.floor(mm/seg)),t=(mm-n*seg)/seg;
+      const A=pts[n],B=pts[n+1],L2=Math.max(.01,Math.hypot(B.x-A.x,B.y-A.y)),ux=(B.x-A.x)/L2,uy=(B.y-A.y)/L2,c=d.c*(1+f*2.5)*ks;
+      const x=A.x+(B.x-A.x)*t-uy*c,y=A.y+(B.y-A.y)*t+ux*c,tail=Math.min(12,Math.max(4,6*ks));
+      cx.strokeStyle=`rgba(${col},${al*.95})`;cx.lineWidth=d.r*1.3;cx.lineCap='round';
+      cx.beginPath();cx.moveTo(x-ux*tail,y-uy*tail);cx.lineTo(x,y);cx.stroke();
+      cx.fillStyle=`rgba(${col},${al*.3})`;cx.beginPath();cx.arc(x,y,d.r*2.6,0,7);cx.fill();
     }
   }
 }
