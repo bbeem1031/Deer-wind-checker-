@@ -94,7 +94,7 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
 .thermal .lg{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:4px;font-style:normal;font-size:11px;font-weight:500;color:var(--dim)}
 .sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:4px;vertical-align:-2px}
 .sw.lo{background:#2878ff}.sw.hi{background:#ff5a28}
-.sw.ln{height:4px;width:18px;border-radius:2px;vertical-align:2px}.sw.ln.plume{background:#fff0c8;box-shadow:0 0 6px #ffe7a8}.sw.ln.rise{background:#ff6a5a}.sw.ln.fall{background:#64b4ff}
+.sw.ln{height:4px;width:18px;border-radius:2px;vertical-align:2px}.sw.ln.rise{background:#ff6a5a}.sw.ln.fall{background:#64b4ff}
 .poolTag{transform:translate(-50%,-30px);white-space:nowrap;font:600 12px/1 var(--body);color:#0d1a2a;background:#64b4ff;padding:4px 7px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.5)}
 .thermal.rise{color:var(--rise)} .thermal.fall{color:var(--fall)}
 .hr .th{display:none;font-size:10px;font-weight:700;line-height:1;margin-top:2px}
@@ -248,7 +248,7 @@ function render(){
   if(selIdx()<0) selTime=null; // selected hour has passed or vanished
   renderSky();
   const t=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move · build 11/14f`;
+  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move · build 11/14e`;
   const c=wx.current,h=wx.hourly,key=c.time.slice(0,13)+':00';let i=h.time.indexOf(key);if(i<0)i=0;
   const arrow=d=>`<svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${d} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg>`;
   const thm=j=>{const q=thermalAt(j,h.wind_speed_10m[j]);return `<div class="th ${q.mode}">${q.mode==='rise'?'▲ rise':'▼ fall'}</div>`;};
@@ -396,6 +396,26 @@ function drawFlow(){
     const a=dest(lat,lng,(brg+180)%360,len/2);
     chev(a,brg,len,col,2,.3+.45*q.strength);
   }
+  // your scent's thermal path: follow the slope from the stand
+  if(!pos) return;
+  const path=[pos];thermPath=path;let p=pos,dist=0,pooled=false;
+  while(dist<450){
+    const gg=gradAt(p[0],p[1]);if(!gg) break;
+    const m=Math.hypot(gg.gx,gg.gy);if(m<.004){pooled=true;break;}
+    const up=(Math.atan2(gg.gx,gg.gy)*180/Math.PI+360)%360;
+    p=dest(p[0],p[1],rise?up:(up+180)%360,12);dist+=12;path.push(p);
+  }
+  if(path.length>2){
+    flowLayer.addLayer(L.polyline(path,{color:col,weight:12,opacity:.25,interactive:false,lineCap:'round',lineJoin:'round'}));
+    flowLayer.addLayer(L.polyline(path,{color:'#ffffff',weight:3.5,opacity:.95,interactive:false,lineCap:'round',lineJoin:'round',dashArray:'2 8'}));
+    flowLayer.addLayer(L.polyline(path,{color:col,weight:3,opacity:.95,interactive:false,lineCap:'round',lineJoin:'round'}));
+    for(let n=8;n<path.length;n+=8){const a=path[n-1],b=path[n];
+      const brg=(Math.atan2((b[1]-a[1])*Math.cos(a[0]*Math.PI/180),b[0]-a[0])*180/Math.PI+360)%360;
+      chev(dest(b[0],b[1],(brg+180)%360,9),brg,18,'#ffffff',3,.95);}
+    const end=path[path.length-1];
+    flowLayer.addLayer(L.circleMarker(end,{radius:7,color:'#fff',weight:2,fillColor:col,fillOpacity:.9,interactive:false}));
+    if(pooled&&!rise) flowLayer.addLayer(L.marker(end,{interactive:false,icon:L.divIcon({className:'',iconSize:[0,0],html:'<div class="poolTag">Scent pools here</div>'})}));
+  }
 }
 function renderThermal(){
   document.body.classList.toggle('thermals',thermalsOn);
@@ -420,7 +440,7 @@ function renderThermal(){
   const head=q.mode==='rise'?'scent rises uphill':'scent sinks downhill';
   const flat=elev&&elev.zmax-elev.zmin<3;
   const legend=flat?'<em class="lg">Ground here is nearly flat, so there is no slope for thermals to follow.</em>':
-    `<em class="lg"><i class="sw lo"></i>Low ground <i class="sw hi"></i>High ground <i class="sw ln plume"></i>Your scent plume (wind + thermals)</em>`;
+    `<em class="lg"><i class="sw lo"></i>Low ground <i class="sw hi"></i>High ground <i class="sw ln ${q.mode}"></i>Your scent's thermal path</em>`;
   el.innerHTML=`<b>Thermals: ${q.label} · ${head}</b><span>${at}${q.windNote?' '+q.windNote:''}</span>${elev?legend:''}`;
 }
 $('btnThermal').onclick=()=>{thermalsOn=!thermalsOn;if(thermalsOn){tParts=[];if(needElevReload())loadElev();else buildTField();}renderThermal();};
@@ -592,52 +612,49 @@ function loop(){
 }
 /* Your scent, drawn as tight puffs leaving the stand: one stream rides the wind through the cone,
    one follows the thermal path. Each puff is a bunch of streaks that spreads a little as it travels. */
-/* Scent plume: many fine particles leave your spot and are carried by the near-ground wind plus,
-   when Thermals is on, the slope-driven thermal drift. Positions are in meters, so zoom only scales it. */
-let plumeP=[],plumeKey='';
-const TIMESCALE=30; // 1 second on screen = 30 seconds of real drift
+// puff offsets are in meters, so a puff is the same patch of ground at every zoom level
+function newPuff(){const n=7+(Math.random()*5|0),dots=[];for(let k=0;k<n;k++)dots.push({a:gauss()*4.5,c:gauss()*3,r:1.3+Math.random()*1.1});return dots;}
+function streak(x,y,dx,dy,r,col,al){
+  cx.strokeStyle=`rgba(${col},${al*.9})`;cx.lineWidth=r*1.3;cx.lineCap='round';
+  cx.beginPath();cx.moveTo(x-dx,y-dy);cx.lineTo(x,y);cx.stroke();
+  cx.fillStyle=`rgba(${col},${al*.25})`;cx.beginPath();cx.arc(x,y,r*2.6,0,7);cx.fill();
+}
+const FPS=60;
 function drawScentStreams(v){
-  const key=pos[0].toFixed(5)+','+pos[1].toFixed(5)+'|'+(selTime||'now')+'|'+thermalsOn;
-  if(key!==plumeKey){
-    // moved, new hour, or thermals toggled: keep it smooth if it's a tiny GPS wobble
-    const old=plumeKey.split('|');plumeKey=key;
-    if(old.slice(1).join('|')!==key.split('|').slice(1).join('|')) plumeP=[];
-  }
-  const latM=111320,lngM=111320*Math.cos(pos[0]*Math.PI/180);
   const o=map.latLngToContainerPoint(pos);
-  const ex=map.latLngToContainerPoint([pos[0],pos[1]+100/lngM]),ny=map.latLngToContainerPoint([pos[0]+100/latM,pos[1]]);
-  const kxx=(ex.x-o.x)/100,kxy=(ex.y-o.y)/100,kyx=(ny.x-o.x)/100,kyy=(ny.y-o.y)/100;
-  // near-ground wind is roughly half the 10 m forecast
-  const to=(v.d+180)*Math.PI/180,ws=Math.max(.25,v.s*.447*.5),wx_=Math.sin(to)*ws,wy_=Math.cos(to)*ws;
-  const gustMix=Math.max(0,v.g-v.s)*.447*.18+.12;
-  let tq=null;
-  if(thermalsOn&&elev){tq=thermalAt(hourIdx(),v.s);}
-  const dt=TIMESCALE/60;
-  // emit
-  for(let n=0;n<5;n++) plumeP.push({x:gauss()*1.2,y:gauss()*1.2,age:0,life:(380/ws)*(.6+Math.random()*.5)});
-  cx.save();cx.globalCompositeOperation='lighter';
-  for(let i=plumeP.length-1;i>=0;i--){
-    const p=plumeP[i];
-    let vx=wx_,vy=wy_;
-    if(tq){
-      const g=gradAt(pos[0]+p.y/latM,pos[1]+p.x/lngM);
-      if(g){const m=Math.hypot(g.gx,g.gy);
-        if(m>.004){const sp=(tq.mode==='rise'?1:-1)*tq.strength*(.35+Math.min(1,m/.08)*1.2)/m;vx+=g.gx*sp;vy+=g.gy*sp;}}
+  const e=map.latLngToContainerPoint(dest(pos[0],pos[1],(v.d+180)%360,SCENT_M));
+  const k=Math.hypot(e.x-o.x,e.y-o.y)/SCENT_M;           // screen pixels per meter at this zoom
+  const ks=Math.max(k,.7);                                  // keep tight puffs readable when zoomed way out
+  const sp=spreadDeg()*Math.PI/180,to=Math.atan2(e.x-o.x,-(e.y-o.y)); // screen bearing of the wind
+  // wind: a puff reaches the end of the cone in 6–16 s depending on wind speed
+  const secs=Math.max(6,Math.min(16,16-v.s*.7)),mStep=SCENT_M/(secs*FPS);
+  if(++puffClock>=28){puffClock=0;windPuffs.push({m:0,ang:gauss()*sp*.55,v:mStep*(.85+Math.random()*.3),dots:newPuff()});}
+  for(let i=windPuffs.length-1;i>=0;i--){
+    const pf=windPuffs[i];pf.m+=pf.v;if(pf.m>SCENT_M){windPuffs.splice(i,1);continue;}
+    const f=pf.m/SCENT_M,ang=to+pf.ang,ux=Math.sin(ang),uy=-Math.cos(ang),grow=1+f*3,al=Math.min(1,pf.m/12)*(1-Math.pow(f,1.6));
+    const tail=Math.min(12,Math.max(4,6*ks));
+    for(const q of pf.dots){
+      const along=pf.m*k+q.a*ks,cross=q.c*grow*ks;
+      streak(o.x+ux*along-uy*cross,o.y+uy*along+ux*cross,ux*tail,uy*tail,q.r,f<.5?'255,220,90':'255,160,50',al);
     }
-    const turb=gustMix*Math.sqrt(dt)*(1+Math.min(3,p.age/40));
-    p.x+=vx*dt+gauss()*turb*3;p.y+=vy*dt+gauss()*turb*3;p.age+=dt;
-    const dist=Math.hypot(p.x,p.y);
-    if(p.age>p.life||dist>460){plumeP.splice(i,1);continue;}
-    const f=p.age/p.life,al=Math.min(1,p.age/3)*(1-f)*(1-f)*.55;
-    const sx=o.x+p.x*kxx+p.y*kyx,sy=o.y+p.x*kxy+p.y*kyy;
-    if(sx<-5||sy<-5||sx>W+5||sy>H+5) continue;
-    cx.fillStyle=`rgba(255,${238-f*40|0},${200-f*90|0},${al})`;
-    cx.fillRect(sx-1,sy-1,2,2);
   }
-  cx.restore();
-  if(plumeP.length>4500) plumeP.splice(0,plumeP.length-4500);
-  // source dot
-  cx.fillStyle='rgba(255,240,200,.95)';cx.beginPath();cx.arc(o.x,o.y,4,0,7);cx.fill();
+  // thermals: puffs follow the thermal path off the stand
+  if(!thermalsOn||!thermPath||thermPath.length<3){thermPuffs=[];return;}
+  const q=thermalAt(hourIdx(),v.s),col=q.mode==='rise'?'255,106,90':'100,180,255';
+  const pts=thermPath.map(ll=>map.latLngToContainerPoint(ll)),seg=12; // path points are 12 m apart
+  const total=(pts.length-1)*seg;
+  const tSecs=18-q.strength*8,tStep=total/(tSecs*FPS);
+  if(++thermClock>=34){thermClock=0;thermPuffs.push({m:0,v:tStep*(.85+Math.random()*.3),dots:newPuff()});}
+  for(let i=thermPuffs.length-1;i>=0;i--){
+    const pf=thermPuffs[i];pf.m+=pf.v;if(pf.m>total){thermPuffs.splice(i,1);continue;}
+    const f=pf.m/total,al=Math.min(1,pf.m/12)*(1-Math.pow(f,2))*(.55+.45*q.strength);
+    for(const d of pf.dots){
+      const mm=Math.max(0,Math.min(total-.01,pf.m+d.a)),n=Math.min(pts.length-2,Math.floor(mm/seg)),t=(mm-n*seg)/seg;
+      const A=pts[n],B=pts[n+1],L=Math.max(.01,Math.hypot(B.x-A.x,B.y-A.y)),ux=(B.x-A.x)/L,uy=(B.y-A.y)/L,c=d.c*(1+f*2)*ks;
+      const tail=Math.min(12,Math.max(4,6*ks));
+      streak(A.x+(B.x-A.x)*t-uy*c,A.y+(B.y-A.y)*t+ux*c,ux*tail,uy*tail,d.r,col,al);
+    }
+  }
 }
 
 startGps();
