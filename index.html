@@ -248,7 +248,7 @@ function render(){
   if(selIdx()<0) selTime=null; // selected hour has passed or vanished
   renderSky();
   const t=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move · build 11/14c`;
+  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move · build 11/14g`;
   const c=wx.current,h=wx.hourly,key=c.time.slice(0,13)+':00';let i=h.time.indexOf(key);if(i<0)i=0;
   const arrow=d=>`<svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${d} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg>`;
   const thm=j=>{const q=thermalAt(j,h.wind_speed_10m[j]);return `<div class="th ${q.mode}">${q.mode==='rise'?'▲ rise':'▼ fall'}</div>`;};
@@ -343,7 +343,7 @@ function buildTField(){
   for(let y=0;y<=H+TSTEP;y+=TSTEP){const row=[];for(let x=0;x<=W+TSTEP;x+=TSTEP){
     const ll=map.containerPointToLatLng([x,y]),q=gradAt(ll.lat,ll.lng);
     row.push(q?{x:q.gx,y:-q.gy,m:Math.hypot(q.gx,q.gy)}:null);} tField.push(row);}
-  if(!tParts.length) tParts=Array.from({length:Math.round(W*H/2600)},()=>newT(true));
+  if(!tParts.length) tParts=Array.from({length:Math.round(W*H/2000)},()=>newT(true));
 }
 function newT(any){return{x:Math.random()*W,y:Math.random()*H,a:any?Math.random()*120|0:0,life:90+Math.random()*80,s:.6+Math.random()*.8,r:Math.random()<.3?2:1.4};}
 function needElevReload(){
@@ -623,7 +623,7 @@ function loop(){
       p.x+=vx;p.y+=vy;p.a++;
       if(p.a>p.life||p.x<-10||p.y<-10||p.x>W+10||p.y>H+10) Object.assign(p,newT(false));
       const flat=!cell||cell.m<=.004;
-      dot(p.x,p.y,p.r*(flat&&q.mode==='rise'?1+p.a/p.life:1),col,Math.sin(Math.PI*p.a/p.life)*(.35+.6*q.strength)*(flat?.5:1));
+      dot(p.x,p.y,p.r*(flat&&q.mode==='rise'?1+p.a/p.life:1),col,Math.sin(Math.PI*p.a/p.life)*(.5+.5*q.strength)*(flat?.6:1));
     }
   }
 }
