@@ -14,7 +14,7 @@
 /* Layout: full-bleed satellite map with a live particle layer; slim readout on top, compact deck at bottom */
 :root{
   --ground:#14130f; --panel:rgba(20,19,15,.82); --line:rgba(236,230,214,.16);
-  --bone:#ece6d6; --dim:#a39d8c; --blaze:#ff6a13;
+  --bone:#ece6d6; --rise:#ff6a5a; --fall:#64b4ff; --dim:#a39d8c; --blaze:#ff6a13;
   --display:"Barlow Condensed","Arial Narrow",sans-serif;
   --body:"Barlow",system-ui,-apple-system,sans-serif;
   color-scheme:dark;
@@ -88,6 +88,16 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
 .hr.sel{background:var(--blaze);border-color:var(--blaze)}
 .hr.sel .t,.hr.sel .d,.hr.sel .s{color:#1a0d04}
 .hr.sel path{stroke:#1a0d04}.hr.sel path+path{fill:#1a0d04;stroke:none}.hr.sel circle{fill:#fff}
+.thermal{margin-top:6px;font-size:13px;font-weight:600;line-height:1.3;max-width:34em}
+.thermal b{font-family:var(--display);font-size:19px;font-weight:700;letter-spacing:.01em}
+.thermal span{display:block;font-weight:500;color:var(--bone);opacity:.85}
+.thermal.rise{color:var(--rise)} .thermal.fall{color:var(--fall)}
+.hr .th{display:none;font-size:10px;font-weight:700;line-height:1;margin-top:2px}
+body.thermals .hr .th{display:block}
+.hr .th.rise{color:var(--rise)} .hr .th.fall{color:var(--fall)}
+.hr.sel .th{color:#1a0d04}
+#btnThermal.on{background:var(--rise);border-color:var(--rise);color:#1a0d04}
+#btnThermal.on.fall{background:var(--fall);border-color:var(--fall)}
 .viewing{margin-top:6px;font-family:var(--display);font-size:20px;font-weight:700;color:var(--blaze);line-height:1}
 .hr .t{font-size:10px;color:var(--dim)}
 .hr svg{display:block;margin:2px auto}
@@ -120,6 +130,7 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
   </div>
   <div class="legal" id="legal"></div>
   <div class="viewing" id="viewing" hidden></div>
+  <div class="thermal" id="thermal" hidden></div>
   <div class="status" id="status">Getting your location…</div>
 </header>
 
@@ -146,6 +157,7 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
       <div class="btns">
         <button id="btnCompass" type="button">Compass</button>
         <button id="btnGps" type="button" hidden>Back to my spot</button>
+        <button id="btnThermal" type="button">Thermals</button>
         <button id="btnRefresh" type="button">Refresh</button>
       </div>
     </div>
@@ -169,7 +181,7 @@ let map,me,cone,pos=null,src='gps',wx=null,heading=null,compassOn=false,watchId=
  $('ticks').innerHTML=s;})();
 
 map=L.map('map',{zoomControl:false}).setView([41.03,-94.2],17);
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:18,attribution:'Imagery © Esri · Wind: Open-Meteo'}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:18,attribution:'Imagery © Esri · Wind & terrain: Open-Meteo, Copernicus DEM'}).addTo(map);
 map.on('click',e=>{src='pin';if(accRing){map.removeLayer(accRing);accRing=null;}setPos(e.latlng.lat,e.latlng.lng,false);});
 map.on('zoomstart',()=>{plume=[];});
 
@@ -226,11 +238,12 @@ function render(){
   $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move`;
   const c=wx.current,h=wx.hourly,key=c.time.slice(0,13)+':00';let i=h.time.indexOf(key);if(i<0)i=0;
   const arrow=d=>`<svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${d} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg>`;
-  let out=`<button type="button" class="hr" data-t=""><div class="t">Now</div>${arrow(c.wind_direction_10m)}<div class="s">${Math.round(c.wind_speed_10m)}</div><div class="d">${card(c.wind_direction_10m)}</div></button>`;
+  const thm=j=>{const q=thermalAt(j,h.wind_speed_10m[j]);return `<div class="th ${q.mode}">${q.mode==='rise'?'▲ rise':'▼ fall'}</div>`;};
+  let out=`<button type="button" class="hr" data-t=""><div class="t">Now</div>${arrow(c.wind_direction_10m)}<div class="s">${Math.round(c.wind_speed_10m)}</div><div class="d">${card(c.wind_direction_10m)}</div>${thm(i)}</button>`;
   for(let k=1;k<=18&&i+k<h.time.length;k++){
     const j=i+k,d=h.wind_direction_10m[j];
     const hr=new Date(h.time[j]).toLocaleTimeString([],{hour:'numeric'});
-    out+=`<button type="button" class="hr" data-t="${h.time[j]}"><div class="t">${hr}</div>${arrow(d)}<div class="s">${Math.round(h.wind_speed_10m[j])}</div><div class="d">${card(d)}</div></button>`;
+    out+=`<button type="button" class="hr" data-t="${h.time[j]}"><div class="t">${hr}</div>${arrow(d)}<div class="s">${Math.round(h.wind_speed_10m[j])}</div><div class="d">${card(d)}</div>${thm(j)}</button>`;
   }
   $('hours').innerHTML=out;
   applyView();
@@ -251,9 +264,104 @@ function applyView(){
   }
   document.querySelectorAll('.hr').forEach(b=>b.classList.toggle('sel',v.live?b.dataset.t==='':b.dataset.t===selTime));
   plume=[];
-  drawCone(); updateRel(); placeReticle();
+  drawCone(); updateRel(); placeReticle(); renderThermal();
 }
 
+/* ===== Thermals =====
+   Rising: sun-warmed slopes pull air (and scent) uphill, roughly 1.5 hrs after sunrise until late afternoon while it's warming.
+   Falling: cooling air sinks and drains downhill, from late afternoon through the night and into early morning.
+   Terrain comes from Open-Meteo's elevation model (about 90 m resolution), so it shows ridges, draws and creek bottoms, not single trees. */
+let thermalsOn=false,elev=null,elevBusy=false,tField=[],tParts=[];
+const TSTEP=32;
+function hourIdx(){const h=wx.hourly;let j=selIdx();if(j<0){j=h.time.indexOf(wx.current.time.slice(0,13)+':00');if(j<0)j=0;}return j;}
+function thermalAt(j,wind){
+  const h=wx.hourly,d=wx.daily,T=h.temperature_2m;
+  const t=new Date(h.time[j]),di=Math.max(0,d.time.indexOf(h.time[j].slice(0,10)));
+  const sr=new Date(d.sunrise[di]),ss=new Date(d.sunset[di]);
+  const a=T[Math.max(0,j-1)],b=T[Math.min(T.length-1,j+1)],dT=(b-a)/2; // °F per hour
+  const afterSR=(t-sr)/36e5,toSS=(ss-t)/36e5;
+  let mode,label,strength;
+  if(t<sr||t>ss){mode='fall';label='Falling';strength=(t>ss&&(t-ss)/36e5<3)?1:.65;}
+  else if(afterSR<1.5&&dT<3){mode='fall';label='Switching soon';strength=.35;}
+  else if(toSS<1.5){mode='fall';label='Switching to falling';strength=.6;}
+  else if(dT<-1.5){mode='fall';label='Falling (cooling fast)';strength=.5;}
+  else{mode='rise';label='Rising';strength=Math.min(1,.5+Math.max(0,dT)*.2);}
+  let windNote='';
+  if(wind>=12){strength*=.3;windNote='Wind this strong will mostly override thermals.';}
+  else if(wind>=7){strength*=.65;windNote='Moderate wind will mix with thermals.';}
+  return{mode,label,strength,windNote};
+}
+async function loadElev(){
+  if(elevBusy||!thermalsOn) return;
+  const c=map.getCenter(),b=map.getBounds();
+  const diag=map.distance(b.getSouthWest(),b.getNorthEast());
+  const half=Math.max(650,diag*.65),N=10;
+  const dLat=half/111320,dLng=half/(111320*Math.cos(c.lat*Math.PI/180));
+  const g={s:c.lat-dLat,n:c.lat+dLat,w:c.lng-dLng,e:c.lng+dLng,N,zoom:map.getZoom()};
+  const la=[],lo=[];
+  for(let r=0;r<N;r++)for(let k=0;k<N;k++){la.push((g.s+(g.n-g.s)*r/(N-1)).toFixed(5));lo.push((g.w+(g.e-g.w)*k/(N-1)).toFixed(5));}
+  elevBusy=true;
+  try{
+    const res=await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${la.join(',')}&longitude=${lo.join(',')}`);
+    if(!res.ok) throw 0;
+    const z=(await res.json()).elevation;
+    // gradient (rise per meter) toward east (gx) and north (gy) at every node
+    const mx=(g.e-g.w)/(N-1)*111320*Math.cos(c.lat*Math.PI/180),my=(g.n-g.s)/(N-1)*111320;
+    const Z=(r,k)=>z[Math.max(0,Math.min(N-1,r))*N+Math.max(0,Math.min(N-1,k))];
+    g.gx=[];g.gy=[];g.z=z;
+    for(let r=0;r<N;r++)for(let k=0;k<N;k++){
+      const kx=(k===0||k===N-1)?1:2,ry=(r===0||r===N-1)?1:2;
+      g.gx.push((Z(r,k+1)-Z(r,k-1))/(kx*mx));g.gy.push((Z(r+1,k)-Z(r-1,k))/(ry*my));
+    }
+    elev=g; buildTField(); renderThermal();
+  }catch(e){ $('thermal').innerHTML='<b>Terrain didn’t load.</b><span>Thermals need a signal once to pull elevation. Toggle again when you have bars.</span>'; }
+  elevBusy=false;
+}
+function gradAt(lat,lng){
+  const g=elev;if(!g) return null;
+  const fr=(lat-g.s)/(g.n-g.s)*(g.N-1),fk=(lng-g.w)/(g.e-g.w)*(g.N-1);
+  if(fr<0||fk<0||fr>g.N-1||fk>g.N-1) return null;
+  const r0=Math.min(g.N-2,Math.floor(fr)),k0=Math.min(g.N-2,Math.floor(fk)),tr=fr-r0,tk=fk-k0;
+  const bl=a=>{const i=r0*g.N+k0;return a[i]*(1-tr)*(1-tk)+a[i+1]*(1-tr)*tk+a[i+g.N]*tr*(1-tk)+a[i+g.N+1]*tr*tk;};
+  return{gx:bl(g.gx),gy:bl(g.gy)};
+}
+function buildTField(){
+  tField=[];if(!elev) return;
+  for(let y=0;y<=H+TSTEP;y+=TSTEP){const row=[];for(let x=0;x<=W+TSTEP;x+=TSTEP){
+    const ll=map.containerPointToLatLng([x,y]),q=gradAt(ll.lat,ll.lng);
+    row.push(q?{x:q.gx,y:-q.gy,m:Math.hypot(q.gx,q.gy)}:null);} tField.push(row);}
+  if(!tParts.length) tParts=Array.from({length:Math.round(W*H/2600)},()=>newT(true));
+}
+function newT(any){return{x:Math.random()*W,y:Math.random()*H,a:any?Math.random()*120|0:0,life:90+Math.random()*80,s:.6+Math.random()*.8,r:Math.random()<.3?2:1.4};}
+function needElevReload(){
+  if(!thermalsOn) return false; if(!elev) return true;
+  const c=map.getCenter(),mr=(elev.n-elev.s)*.25,mk=(elev.e-elev.w)*.25;
+  return c.lat<elev.s+mr||c.lat>elev.n-mr||c.lng<elev.w+mk||c.lng>elev.e-mk||map.getZoom()<elev.zoom-1;
+}
+map.on('move zoomend',()=>{ if(thermalsOn&&elev) buildTField(); });
+map.on('moveend',()=>{ if(needElevReload()) loadElev(); });
+function renderThermal(){
+  document.body.classList.toggle('thermals',thermalsOn);
+  $('btnThermal').classList.toggle('on',thermalsOn);
+  $('thermal').hidden=!thermalsOn;
+  if(!thermalsOn||!wx) return;
+  const j=hourIdx(),q=thermalAt(j,view().s);
+  $('btnThermal').classList.toggle('fall',q.mode==='fall');
+  const el=$('thermal');el.className='thermal '+q.mode;
+  let at='Loading terrain…';
+  if(elev&&pos){
+    const g=gradAt(pos[0],pos[1]);
+    if(g){
+      const slope=Math.hypot(g.gx,g.gy)*100,up=(Math.atan2(g.gx,g.gy)*180/Math.PI+360)%360;
+      if(slope<.6) at=q.mode==='rise'?'Flat ground at your stand: scent lifts straight up and spreads out.':'Flat ground at your stand: scent pools and lingers low.';
+      else{const dir=q.mode==='rise'?up:(up+180)%360;
+        at=`At your stand: drifts ${q.mode==='rise'?'uphill':'downhill'} toward the ${card(dir)} (${slope.toFixed(slope<3?1:0)}% slope).`;}
+    }else at='Move the map over your stand to read its slope.';
+  }
+  const head=q.mode==='rise'?'scent rises uphill':'scent sinks downhill';
+  el.innerHTML=`<b>Thermals: ${q.label} · ${head}</b><span>${at}${q.windNote?' '+q.windNote:''}</span>`;
+}
+$('btnThermal').onclick=()=>{thermalsOn=!thermalsOn;if(thermalsOn){tParts=[];if(needElevReload())loadElev();else buildTField();}renderThermal();};
 const fmtT=s=>new Date(s).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
 const shift=(s,min)=>new Date(new Date(s).getTime()+min*60e3);
 function renderSky(){
@@ -402,7 +510,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&lastFetch
 const cv=$('flow'),cx=cv.getContext('2d');let field=[],plume=[],raf=null,W=0,H=0;
 function size(){const r=devicePixelRatio||1;W=innerWidth;H=innerHeight;cv.width=W*r;cv.height=H*r;cx.setTransform(r,0,0,r,0,0);
   document.documentElement.style.setProperty('--deckH',($('deck').offsetHeight+4)+'px'); placeReticle();
-  field=Array.from({length:Math.round(W*H/1800)},()=>newDot(true));}
+  field=Array.from({length:Math.round(W*H/1800)},()=>newDot(true)); if(typeof thermalsOn!=='undefined'&&thermalsOn&&elev){tParts=[];buildTField();}}
 const COLORS=['255,224,80','255,236,120','196,240,96','170,230,80'];
 function newDot(any){return{x:Math.random()*W,y:Math.random()*H,a:any?Math.random()*150|0:0,life:110+Math.random()*90,s:.55+Math.random()*.9,r:Math.random()<.25?1.9:1.3,c:COLORS[Math.random()*4|0]};}
 addEventListener('resize',size);size();
@@ -424,6 +532,18 @@ function loop(){
     p.x+=ux*base*p.s;p.y+=uy*base*p.s;p.a++;
     if(p.a>p.life||p.x<-10||p.y<-10||p.x>W+10||p.y>H+10){Object.assign(p,newDot(false));}
     dot(p.x,p.y,p.r,p.c,Math.sin(Math.PI*p.a/p.life)*.85);
+  }
+  if(thermalsOn&&tField.length){
+    const q=thermalAt(hourIdx(),v.s),sign=q.mode==='rise'?1:-1,col=q.mode==='rise'?'255,106,90':'100,180,255';
+    for(const p of tParts){
+      const cell=(tField[Math.round(p.y/TSTEP)]||[])[Math.round(p.x/TSTEP)];
+      let vx=0,vy=0;
+      if(cell&&cell.m>.004){const k=sign*q.strength*(.5+Math.min(1,cell.m/.06)*1.6)*p.s/cell.m;vx=cell.x*k;vy=cell.y*k;}
+      p.x+=vx;p.y+=vy;p.a++;
+      if(p.a>p.life||p.x<-10||p.y<-10||p.x>W+10||p.y>H+10) Object.assign(p,newT(false));
+      const flat=!cell||cell.m<=.004;
+      dot(p.x,p.y,p.r*(flat&&q.mode==='rise'?1+p.a/p.life:1),col,Math.sin(Math.PI*p.a/p.life)*(.35+.6*q.strength)*(flat?.5:1));
+    }
   }
 }
 
