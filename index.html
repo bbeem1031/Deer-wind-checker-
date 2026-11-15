@@ -91,6 +91,11 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
 .thermal{margin-top:6px;font-size:13px;font-weight:600;line-height:1.3;max-width:34em}
 .thermal b{font-family:var(--display);font-size:19px;font-weight:700;letter-spacing:.01em}
 .thermal span{display:block;font-weight:500;color:var(--bone);opacity:.85}
+.thermal .lg{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:4px;font-style:normal;font-size:11px;font-weight:500;color:var(--dim)}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:4px;vertical-align:-2px}
+.sw.lo{background:#2878ff}.sw.hi{background:#ff5a28}
+.sw.ln{height:4px;width:18px;border-radius:2px;vertical-align:2px}.sw.ln.rise{background:#ff6a5a}.sw.ln.fall{background:#64b4ff}
+.poolTag{transform:translate(-50%,-30px);white-space:nowrap;font:600 12px/1 var(--body);color:#0d1a2a;background:#64b4ff;padding:4px 7px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.5)}
 .thermal.rise{color:var(--rise)} .thermal.fall{color:var(--fall)}
 .hr .th{display:none;font-size:10px;font-weight:700;line-height:1;margin-top:2px}
 body.thermals .hr .th{display:block}
@@ -221,6 +226,7 @@ function drawCone(){
   pts.push(dest(pos[0],pos[1],to+sp,SCENT_M));
   if(cone) cone.setLatLngs(pts);
   else cone=L.polygon(pts,{color:'#ff6a13',weight:1.5,opacity:.55,fillColor:'#ff6a13',fillOpacity:.2,interactive:false}).addTo(map);
+  if(typeof drawFlow==='function'&&thermalsOn) drawFlow();
 }
 
 async function fetchWx(){
@@ -295,16 +301,15 @@ async function loadElev(){
   if(elevBusy||!thermalsOn) return;
   const c=map.getCenter(),b=map.getBounds();
   const diag=map.distance(b.getSouthWest(),b.getNorthEast());
-  const half=Math.max(650,diag*.65),N=10;
+  const half=Math.max(650,diag*.65),N=20;
   const dLat=half/111320,dLng=half/(111320*Math.cos(c.lat*Math.PI/180));
   const g={s:c.lat-dLat,n:c.lat+dLat,w:c.lng-dLng,e:c.lng+dLng,N,zoom:map.getZoom()};
   const la=[],lo=[];
   for(let r=0;r<N;r++)for(let k=0;k<N;k++){la.push((g.s+(g.n-g.s)*r/(N-1)).toFixed(5));lo.push((g.w+(g.e-g.w)*k/(N-1)).toFixed(5));}
   elevBusy=true;
   try{
-    const res=await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${la.join(',')}&longitude=${lo.join(',')}`);
-    if(!res.ok) throw 0;
-    const z=(await res.json()).elevation;
+    const chunks=[];for(let i=0;i<la.length;i+=100) chunks.push(fetch(`https://api.open-meteo.com/v1/elevation?latitude=${la.slice(i,i+100).join(',')}&longitude=${lo.slice(i,i+100).join(',')}`).then(r=>{if(!r.ok)throw 0;return r.json();}));
+    const z=(await Promise.all(chunks)).flatMap(j=>j.elevation);
     // gradient (rise per meter) toward east (gx) and north (gy) at every node
     const mx=(g.e-g.w)/(N-1)*111320*Math.cos(c.lat*Math.PI/180),my=(g.n-g.s)/(N-1)*111320;
     const Z=(r,k)=>z[Math.max(0,Math.min(N-1,r))*N+Math.max(0,Math.min(N-1,k))];
@@ -313,7 +318,8 @@ async function loadElev(){
       const kx=(k===0||k===N-1)?1:2,ry=(r===0||r===N-1)?1:2;
       g.gx.push((Z(r,k+1)-Z(r,k-1))/(kx*mx));g.gy.push((Z(r+1,k)-Z(r-1,k))/(ry*my));
     }
-    elev=g; buildTField(); renderThermal();
+    g.zmin=Math.min(...z);g.zmax=Math.max(...z);
+    elev=g; drawTerrain(); buildTField(); renderThermal();
   }catch(e){ $('thermal').innerHTML='<b>Terrain didn’t load.</b><span>Thermals need a signal once to pull elevation. Toggle again when you have bars.</span>'; }
   elevBusy=false;
 }
@@ -340,8 +346,73 @@ function needElevReload(){
 }
 map.on('move zoomend',()=>{ if(thermalsOn&&elev) buildTField(); });
 map.on('moveend',()=>{ if(needElevReload()) loadElev(); });
+/* map layers: terrain shading (low ground blue, high ground warm), thermal flow arrows, and your scent's thermal path */
+map.createPane('terrain');map.getPane('terrain').style.zIndex=350;map.getPane('terrain').style.pointerEvents='none';
+const thermLayer=L.layerGroup(),flowLayer=L.layerGroup();let shadeImg=null;
+function drawTerrain(){
+  if(shadeImg){thermLayer.removeLayer(shadeImg);shadeImg=null;}
+  const g=elev;if(!g) return;
+  const N=g.N,cv2=document.createElement('canvas');cv2.width=N;cv2.height=N;const c2=cv2.getContext('2d'),img=c2.createImageData(N,N);
+  const span=Math.max(3,g.zmax-g.zmin);
+  const lowC=[40,120,255],midC=[230,220,160],highC=[255,90,40];
+  for(let r=0;r<N;r++)for(let k=0;k<N;k++){
+    const i=r*N+k,t=(g.z[i]-g.zmin)/span;
+    // hillshade: light from the northwest
+    const sh=Math.max(-1,Math.min(1,(-g.gx[i]+g.gy[i])*8));
+    const a=t<.5?lowC:midC,b=t<.5?midC:highC,u=t<.5?t*2:(t-.5)*2;
+    const px=((N-1-r)*N+k)*4; // image rows run north to south
+    for(let ch=0;ch<3;ch++) img.data[px+ch]=Math.max(0,Math.min(255,(a[ch]+(b[ch]-a[ch])*u)*(1+sh*.35)));
+    img.data[px+3]=g.zmax-g.zmin<3?0:Math.round(255*(.28+Math.abs(t-.5)*.5));
+  }
+  c2.putImageData(img,0,0);
+  const half=.5/(N-1),dla=(g.n-g.s)*half,dlo=(g.e-g.w)*half;
+  shadeImg=L.imageOverlay(cv2.toDataURL(),[[g.s-dla,g.w-dlo],[g.n+dla,g.e+dlo]],{pane:'terrain',opacity:.75,interactive:false});
+  thermLayer.addLayer(shadeImg);
+}
+function chev(a,brg,len,col,w,op){
+  const tip=dest(a[0],a[1],brg,len),l=dest(tip[0],tip[1],brg+150,len*.38),r=dest(tip[0],tip[1],brg-150,len*.38);
+  flowLayer.addLayer(L.polyline([a,tip],{color:col,weight:w,opacity:op,interactive:false,lineCap:'round'}));
+  flowLayer.addLayer(L.polyline([l,tip,r],{color:col,weight:w,opacity:op,interactive:false,lineCap:'round',lineJoin:'round'}));
+}
+function drawFlow(){
+  flowLayer.clearLayers();
+  const g=elev;if(!g||!wx||!thermalsOn) return;
+  const q=thermalAt(hourIdx(),view().s),rise=q.mode==='rise',col=rise?'#ff6a5a':'#64b4ff';
+  // arrow field every other grid node
+  for(let r=1;r<g.N-1;r+=2)for(let k=1;k<g.N-1;k+=2){
+    const i=r*g.N+k,m=Math.hypot(g.gx[i],g.gy[i]);if(m<.006) continue;
+    const up=(Math.atan2(g.gx[i],g.gy[i])*180/Math.PI+360)%360,brg=rise?up:(up+180)%360;
+    const lat=g.s+(g.n-g.s)*r/(g.N-1),lng=g.w+(g.e-g.w)*k/(g.N-1);
+    const cell=(g.n-g.s)*111320/(g.N-1);
+    const len=cell*(.3+Math.min(1,m/.08)*.45);
+    const a=dest(lat,lng,(brg+180)%360,len/2);
+    chev(a,brg,len,col,2,.3+.45*q.strength);
+  }
+  // your scent's thermal path: follow the slope from the stand
+  if(!pos) return;
+  const path=[pos];let p=pos,dist=0,pooled=false;
+  while(dist<450){
+    const gg=gradAt(p[0],p[1]);if(!gg) break;
+    const m=Math.hypot(gg.gx,gg.gy);if(m<.004){pooled=true;break;}
+    const up=(Math.atan2(gg.gx,gg.gy)*180/Math.PI+360)%360;
+    p=dest(p[0],p[1],rise?up:(up+180)%360,12);dist+=12;path.push(p);
+  }
+  if(path.length>2){
+    flowLayer.addLayer(L.polyline(path,{color:col,weight:12,opacity:.25,interactive:false,lineCap:'round',lineJoin:'round'}));
+    flowLayer.addLayer(L.polyline(path,{color:'#ffffff',weight:3.5,opacity:.95,interactive:false,lineCap:'round',lineJoin:'round',dashArray:'2 8'}));
+    flowLayer.addLayer(L.polyline(path,{color:col,weight:3,opacity:.95,interactive:false,lineCap:'round',lineJoin:'round'}));
+    for(let n=8;n<path.length;n+=8){const a=path[n-1],b=path[n];
+      const brg=(Math.atan2((b[1]-a[1])*Math.cos(a[0]*Math.PI/180),b[0]-a[0])*180/Math.PI+360)%360;
+      chev(dest(b[0],b[1],(brg+180)%360,9),brg,18,'#ffffff',3,.95);}
+    const end=path[path.length-1];
+    flowLayer.addLayer(L.circleMarker(end,{radius:7,color:'#fff',weight:2,fillColor:col,fillOpacity:.9,interactive:false}));
+    if(pooled&&!rise) flowLayer.addLayer(L.marker(end,{interactive:false,icon:L.divIcon({className:'',iconSize:[0,0],html:'<div class="poolTag">Scent pools here</div>'})}));
+  }
+}
 function renderThermal(){
   document.body.classList.toggle('thermals',thermalsOn);
+  if(thermalsOn){if(!map.hasLayer(thermLayer))thermLayer.addTo(map);if(!map.hasLayer(flowLayer))flowLayer.addTo(map);drawFlow();}
+  else{map.removeLayer(thermLayer);map.removeLayer(flowLayer);}
   $('btnThermal').classList.toggle('on',thermalsOn);
   $('thermal').hidden=!thermalsOn;
   if(!thermalsOn||!wx) return;
@@ -359,7 +430,10 @@ function renderThermal(){
     }else at='Move the map over your stand to read its slope.';
   }
   const head=q.mode==='rise'?'scent rises uphill':'scent sinks downhill';
-  el.innerHTML=`<b>Thermals: ${q.label} · ${head}</b><span>${at}${q.windNote?' '+q.windNote:''}</span>`;
+  const flat=elev&&elev.zmax-elev.zmin<3;
+  const legend=flat?'<em class="lg">Ground here is nearly flat, so there is no slope for thermals to follow.</em>':
+    `<em class="lg"><i class="sw lo"></i>Low ground <i class="sw hi"></i>High ground <i class="sw ln ${q.mode}"></i>Your scent's thermal path</em>`;
+  el.innerHTML=`<b>Thermals: ${q.label} · ${head}</b><span>${at}${q.windNote?' '+q.windNote:''}</span>${elev?legend:''}`;
 }
 $('btnThermal').onclick=()=>{thermalsOn=!thermalsOn;if(thermalsOn){tParts=[];if(needElevReload())loadElev();else buildTField();}renderThermal();};
 const fmtT=s=>new Date(s).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
