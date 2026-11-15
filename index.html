@@ -185,7 +185,12 @@ let map,me,cone,pos=null,src='gps',wx=null,heading=null,compassOn=false,watchId=
  s+=`<line x1="${100+r1*Math.sin(t)}" y1="${100-r1*Math.cos(t)}" x2="${100+92*Math.sin(t)}" y2="${100-92*Math.cos(t)}" stroke="rgba(236,230,214,.4)" stroke-width="${a%45?2:4}"/>`;}
  $('ticks').innerHTML=s;})();
 
-map=L.map('map',{zoomControl:false}).setView([41.03,-94.2],17);
+map=L.map('map',{zoomControl:false,minZoom:5,maxZoom:19}).setView([41.03,-94.2],17);
+// once you touch, pinch or scroll the map, stop the GPS from re-centering or re-zooming it
+let userTouched=false,firstFix=true;
+['touchstart','pointerdown','wheel'].forEach(ev=>map.getContainer().addEventListener(ev,()=>{userTouched=true;followUntil=0;},{passive:true}));
+// keep Safari from zooming the whole page (which snaps back) when a pinch lands on the panels
+['gesturestart','gesturechange'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:18,attribution:'Imagery © Esri · Wind & terrain: Open-Meteo, Copernicus DEM'}).addTo(map);
 map.on('click',e=>{src='pin';if(accRing){map.removeLayer(accRing);accRing=null;}setPos(e.latlng.lat,e.latlng.lng,false);});
 map.on('zoomstart',()=>{plume=[];});
@@ -201,7 +206,7 @@ const standIcon=L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,34],
 let accRing=null,followUntil=0,bestAcc=1e9;
 function visDy(){const h1=document.querySelector('.top').offsetHeight,h2=$('deck').offsetHeight;return Math.round((h1-h2)/2);}
 function placeReticle(){document.documentElement.style.setProperty('--dy',visDy()+'px');}
-function centerOn(ll){map.setView(ll,Math.max(map.getZoom(),17),{animate:false});map.panBy([0,-visDy()],{animate:false});}
+function centerOn(ll){const z=firstFix?17:map.getZoom();firstFix=false;map.setView(ll,z,{animate:false});map.panBy([0,-visDy()],{animate:false});}
 function setPos(lat,lon,center){
   const moved=!pos||map.distance(pos,[lat,lon])>75;
   pos=[lat,lon]; plume=[]; gpsBtn&&setTimeout(gpsBtn);
@@ -555,7 +560,7 @@ function startGps(){
   watchId=navigator.geolocation.watchPosition(p=>{
       if(src==='pin')return; src='gps';
       const a=p.coords.accuracy||0, ll=[p.coords.latitude,p.coords.longitude];
-      const recenter=Date.now()<followUntil&&a<bestAcc; if(recenter) bestAcc=a;
+      const recenter=!userTouched&&Date.now()<followUntil&&a<bestAcc; if(recenter) bestAcc=a;
       setPos(ll[0],ll[1],recenter);
       if(!accRing) accRing=L.circle(ll,{radius:a,color:'#7fb8ff',weight:1,opacity:.7,fillColor:'#7fb8ff',fillOpacity:.12,interactive:false}).addTo(map);
       else {accRing.setLatLng(ll);accRing.setRadius(a);}
@@ -564,7 +569,7 @@ function startGps(){
     ()=>{useCenter();},{enableHighAccuracy:true,maximumAge:0,timeout:20000});
 }
 function gpsBtn(){$('btnGps').hidden=(src==='gps');}
-$('btnGps').onclick=()=>{src='gps';gpsBtn();$('status').textContent='Finding you…';startGps();};
+$('btnGps').onclick=()=>{userTouched=false;src='gps';gpsBtn();$('status').textContent='Finding you…';startGps();};
 $('hours').addEventListener('click',e=>{
   const b=e.target.closest('.hr'); if(!b||!wx) return;
   selTime=b.dataset.t||null; applyView();
