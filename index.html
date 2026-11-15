@@ -21,7 +21,7 @@
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-html,body{height:100%;margin:0;background:var(--ground);color:var(--bone);font-family:var(--body);-webkit-tap-highlight-color:transparent;overflow:hidden}
+html,body{overscroll-behavior:none;touch-action:none;height:100%;margin:0;background:var(--ground);color:var(--bone);font-family:var(--body);-webkit-tap-highlight-color:transparent;overflow:hidden}
 #map{position:fixed;inset:0;background:#1b1a14}
 #flow{position:fixed;inset:0;pointer-events:none;z-index:400}
 .leaflet-control-attribution{background:rgba(20,19,15,.55)!important;color:var(--dim)!important;font-size:9px}
@@ -41,7 +41,7 @@ html,body{height:100%;margin:0;background:var(--ground);color:var(--bone);font-f
 .sky span{display:block;font-family:var(--body);font-size:9px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
 .sky span::after{content:" ›";color:var(--blaze)}
 .sheet-bg{position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
-.sheet{width:100%;max-width:440px;background:#1d1b15;border:1px solid var(--line);border-radius:14px;padding:14px 14px 16px;box-shadow:0 12px 40px rgba(0,0,0,.6)}
+.sheet{touch-action:pan-y;overflow:auto;max-height:100%;width:100%;max-width:440px;background:#1d1b15;border:1px solid var(--line);border-radius:14px;padding:14px 14px 16px;box-shadow:0 12px 40px rgba(0,0,0,.6)}
 .sheet h2{margin:0;font-family:var(--display);font-size:24px;font-weight:700;letter-spacing:.01em}
 .sheet .sub{font-size:12px;color:var(--dim);margin-top:2px}
 .sheet-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px}
@@ -82,7 +82,7 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
 
 .hlbl{margin-top:9px;font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
 .hlbl b{color:var(--blaze);font-weight:600}
-.hours{margin-top:5px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+.hours{touch-action:pan-x;margin-top:5px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
 .hours::-webkit-scrollbar{display:none}
 .hr{flex:none;width:48px;text-align:center;padding:5px 0;border-radius:8px;background:rgba(236,230,214,.06);border:2px solid transparent;color:var(--bone);font:inherit;cursor:pointer}
 .hr.sel{background:var(--blaze);border-color:var(--blaze)}
@@ -188,7 +188,9 @@ let map,me,cone,pos=null,src='gps',wx=null,heading=null,compassOn=false,watchId=
 map=L.map('map',{zoomControl:false,minZoom:5,maxZoom:19}).setView([41.03,-94.2],17);
 // once you touch, pinch or scroll the map, stop the GPS from re-centering or re-zooming it
 let userTouched=false,firstFix=true;
-['touchstart','pointerdown','wheel'].forEach(ev=>map.getContainer().addEventListener(ev,()=>{userTouched=true;followUntil=0;},{passive:true}));
+const stopFollow=()=>{userTouched=true;followUntil=0;};
+['touchstart','pointerdown','mousedown','wheel'].forEach(ev=>map.getContainer().addEventListener(ev,stopFollow,{passive:true,capture:true}));
+map.on('dragstart',stopFollow);
 // keep Safari from zooming the whole page (which snaps back) when a pinch lands on the panels
 ['gesturestart','gesturechange'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:18,attribution:'Imagery © Esri · Wind & terrain: Open-Meteo, Copernicus DEM'}).addTo(map);
@@ -246,7 +248,7 @@ function render(){
   if(selIdx()<0) selTime=null; // selected hour has passed or vanished
   renderSky();
   const t=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move`;
+  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move · build 11/14c`;
   const c=wx.current,h=wx.hourly,key=c.time.slice(0,13)+':00';let i=h.time.indexOf(key);if(i<0)i=0;
   const arrow=d=>`<svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${d} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg>`;
   const thm=j=>{const q=thermalAt(j,h.wind_speed_10m[j]);return `<div class="th ${q.mode}">${q.mode==='rise'?'▲ rise':'▼ fall'}</div>`;};
@@ -560,7 +562,7 @@ function startGps(){
   watchId=navigator.geolocation.watchPosition(p=>{
       if(src==='pin')return; src='gps';
       const a=p.coords.accuracy||0, ll=[p.coords.latitude,p.coords.longitude];
-      const recenter=!userTouched&&Date.now()<followUntil&&a<bestAcc; if(recenter) bestAcc=a;
+      const recenter=!userTouched&&(firstFix||(Date.now()<followUntil&&a<bestAcc&&a>15)); if(recenter) bestAcc=a;
       setPos(ll[0],ll[1],recenter);
       if(!accRing) accRing=L.circle(ll,{radius:a,color:'#7fb8ff',weight:1,opacity:.7,fillColor:'#7fb8ff',fillOpacity:.12,interactive:false}).addTo(map);
       else {accRing.setLatLng(ll);accRing.setRadius(a);}
