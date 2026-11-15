@@ -101,6 +101,7 @@ button:focus-visible{outline:2px solid var(--blaze);outline-offset:2px}
 body.thermals .hr .th{display:block}
 .hr .th.rise{color:var(--rise)} .hr .th.fall{color:var(--fall)}
 .hr.sel .th{color:#1a0d04}
+#btnLabels.on{background:rgba(236,230,214,.22);border-color:rgba(236,230,214,.5)}
 #btnThermal.on{background:var(--rise);border-color:var(--rise);color:#1a0d04}
 #btnThermal.on.fall{background:var(--fall);border-color:var(--fall)}
 .viewing{margin-top:6px;font-family:var(--display);font-size:20px;font-weight:700;color:var(--blaze);line-height:1}
@@ -163,6 +164,7 @@ body.thermals .hr .th{display:block}
         <button id="btnCompass" type="button">Compass</button>
         <button id="btnGps" type="button" hidden>Back to my spot</button>
         <button id="btnThermal" type="button">Thermals</button>
+        <button id="btnLabels" type="button">Roads</button>
         <button id="btnRefresh" type="button">Refresh</button>
       </div>
     </div>
@@ -194,6 +196,17 @@ map.on('dragstart',stopFollow);
 // keep Safari from zooming the whole page (which snaps back) when a pinch lands on the panels
 ['gesturestart','gesturechange'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:18,attribution:'Imagery © Esri · Wind & terrain: Open-Meteo, Copernicus DEM'}).addTo(map);
+/* road lines, highway shields, street and town names over the satellite photo, like a hybrid map */
+map.createPane('labels');map.getPane('labels').style.zIndex=380;map.getPane('labels').style.pointerEvents='none';
+const ESRI='https://server.arcgisonline.com/ArcGIS/rest/services/Reference/';
+const labelLayer=L.layerGroup([
+  L.tileLayer(ESRI+'World_Transportation/MapServer/tile/{z}/{y}/{x}',{pane:'labels',maxZoom:19,maxNativeZoom:19,opacity:.9}),
+  L.tileLayer(ESRI+'World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{pane:'labels',maxZoom:19,maxNativeZoom:19})
+]);
+let labelsOn=true;try{labelsOn=localStorage.getItem('sw_labels')!=='off';}catch(_){}
+function setLabels(on){labelsOn=on;if(on)labelLayer.addTo(map);else map.removeLayer(labelLayer);
+  const b=document.getElementById('btnLabels');if(b){b.classList.toggle('on',on);}
+  try{localStorage.setItem('sw_labels',on?'on':'off');}catch(_){}}
 map.on('click',e=>{src='pin';if(accRing){map.removeLayer(accRing);accRing=null;}setPos(e.latlng.lat,e.latlng.lng,false);});
 map.on('zoomstart',()=>{plume=[];});
 
@@ -248,7 +261,7 @@ function render(){
   if(selIdx()<0) selTime=null; // selected hour has passed or vanished
   renderSky();
   const t=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move · build 11/14g`;
+  $('status').innerHTML=`${src==='gps'?('Your GPS spot'+(accRing?` ±${Math.round(accRing.getRadius()*1.094)} yd`:'')):src==='pin'?'Pinned spot':'<b>Map center</b> (location off)'} · updated ${t} · tap map to move · build 11/14h`;
   const c=wx.current,h=wx.hourly,key=c.time.slice(0,13)+':00';let i=h.time.indexOf(key);if(i<0)i=0;
   const arrow=d=>`<svg width="20" height="20" viewBox="0 0 22 22"><g transform="rotate(${d} 11 11)"><path d="M11 3 V17" stroke="#ece6d6" stroke-width="2.2" stroke-linecap="round"/><path d="M11 20 L7 14 H15 Z" fill="#ece6d6"/><circle cx="11" cy="3" r="2.4" fill="#ff6a13"/></g></svg>`;
   const thm=j=>{const q=thermalAt(j,h.wind_speed_10m[j]);return `<div class="th ${q.mode}">${q.mode==='rise'?'▲ rise':'▼ fall'}</div>`;};
@@ -576,6 +589,7 @@ $('hours').addEventListener('click',e=>{
   const b=e.target.closest('.hr'); if(!b||!wx) return;
   selTime=b.dataset.t||null; applyView();
 });
+setLabels(labelsOn);$('btnLabels').onclick=()=>setLabels(!labelsOn);
 $('btnRefresh').onclick=async()=>{
   const b=$('btnRefresh');b.disabled=true;b.textContent='Updating…';
   const ok=await fetchWx();
